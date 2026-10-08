@@ -17,14 +17,15 @@ video-downloader/
 ├── backend/
 │   ├── app/
 │   │   ├── main.py        # FastAPI 路由 + 前端静态托管
-│   │   ├── downloader.py  # yt-dlp 封装（解析/下载/进度/清理）
+│   │   ├── downloader.py  # 下载调度（yt-dlp 封装 + 平台分流）
+│   │   ├── douyin.py      # 抖音免 Cookie 通道（自研：访客 ttwid + iesdouyin 分享页）
 │   │   └── payments.py    # 支付抽象层 + 模拟支付实现
 │   ├── cookies/
-│   │   └── cookies.txt    # Netscape 格式 Cookie（抖音等平台需要，见下文）
+│   │   └── cookies.txt    # 其它平台可选 Cookie（抖音已无需）
 │   ├── downloads/         # 下载临时目录（自动清理）
-│   ├── run.py             # 启动入口 (0.0.0.0:8000)
+│   ├── run.py             # 启动入口 (0.0.0.0:8000，支持 PORT 环境变量)
 │   └── requirements.txt
-└── frontend/              # Vue 3 + Vite 工程，构建产物 dist/ 由后端托管
+└── frontend/              # Vue 3 + Vite 工程，构建产物输出到 backend/static
 ```
 
 ## 本地运行
@@ -49,14 +50,12 @@ npm run build
 
 ## Cookie 维护（重要）
 
-抖音等平台有 Cookie 风控。若抖音解析报错"需要 Cookie"：
+**抖音已免 Cookie**：`backend/app/douyin.py` 走自研通道——服务端自动向字节官方接口铸造**访客凭证 ttwid**
+（不含任何用户身份信息，仅存服务端内存，5 天自动轮换），再经 iesdouyin 移动分享页解析，
+支持长链 / 短链 / App 分享口令文本，下载无水印视频，可选 ffmpeg 提取音频。用户全程零操作。
 
-1. 本机浏览器打开 douyin.com（保持登录或游客均可）
-2. 使用浏览器扩展（如 "Get cookies.txt LOCALLY"）导出 douyin.com 的 Cookie（Netscape 格式）
-3. 将内容替换 `backend/cookies/cookies.txt` 中 `.douyin.com` 的行，无需重启服务
-
-当前 cookies.txt 内已包含一组有效的抖音 Cookie（有效期约 90 天），失效后按上述步骤更新即可。
-其它平台同理：导出对应域名的 Cookie 追加进同一文件。
+其它平台如遇 Cookie 风控：用浏览器扩展（如 "Get cookies.txt LOCALLY"）导出对应站点 Cookie，
+将 Netscape 格式内容放入 `backend/cookies/cookies.txt` 即可，无需重启服务。
 
 ## 接入真实支付
 

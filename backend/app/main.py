@@ -42,7 +42,12 @@ class MockConfirmReq(BaseModel):
 def analyze(req: AnalyzeReq):
     url = req.url.strip()
     if not url.startswith(("http://", "https://")):
-        raise HTTPException(400, "请输入以 http(s):// 开头的视频链接")
+        # 兼容 App 分享口令等文本：提取其中第一个链接
+        import re
+        m = re.search(r'https?://[^\s，。、"\'）]+', url)
+        if not m:
+            raise HTTPException(400, "请输入视频链接（或包含链接的分享口令）")
+        url = m.group(0)
     try:
         return downloader.analyze(url)
     except downloader.yt_dlp.utils.DownloadError as e:
@@ -55,6 +60,13 @@ def analyze(req: AnalyzeReq):
         elif "cookies" in msg.lower():
             hint = "该平台需要站点配置访问 Cookie（如抖音），请站长更新 backend/cookies/cookies.txt"
         raise HTTPException(400, hint)
+    except RuntimeError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        # 兜底：任何未预期异常都不返回 500 裸错误，给用户可读提示
+        import logging
+        logging.getLogger("uvicorn.error").exception("analyze 未处理异常: %s", url)
+        raise HTTPException(400, "解析服务暂时不可用，请稍后重试")
 
 
 @app.post("/api/download")
