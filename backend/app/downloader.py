@@ -7,6 +7,8 @@ from pathlib import Path
 
 import yt_dlp
 
+from . import douyin as douyin_mod
+
 HAS_FFMPEG = shutil.which("ffmpeg") is not None
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -18,7 +20,8 @@ FILE_TTL_SECONDS = 30 * 60  # 文件保留 30 分钟后清理
 
 
 def _apply_cookies(opts: dict):
-    """若存在 cookies/cookies.txt 则启用（解决抖音等平台的 Cookie 风控）。"""
+    """若存在 cookies/cookies.txt 则启用（其它平台可选的 Cookie 配置）。
+    抖音已走 douyin.py 自研无 Cookie 通道，不再依赖此文件。"""
     if COOKIES_FILE.exists():
         opts["cookiefile"] = str(COOKIES_FILE)
 
@@ -41,8 +44,14 @@ def _clean_option(label: str) -> str:
     return " ".join(label.split())[:60]
 
 
+def is_douyin_url(url: str) -> bool:
+    return "douyin.com" in url or "douyin" in url.lower()
+
+
 def analyze(url: str) -> dict:
     """解析视频信息，返回标题、封面、可选清晰度列表等。"""
+    if is_douyin_url(url):
+        return douyin_mod.analyze(url)
     opts = {
         "quiet": True,
         "no_warnings": True,
@@ -194,6 +203,62 @@ def _run_download(task_id: str, url: str, format_id: str, mode: str):
                 task.update({"status": "error", "error": str(e)[:500]})
 
 
+def _run_douyin_download(task_id: str, url: str, format_id: str, mode: str):
+    """抖音走自研通道：解析 → 无水印直链流式下载（进度自算）→ 可选 ffmpeg 提取音频。"""
+    out = DOWNLOAD_DIR / f"{task_id}.mp4"
+    try:
+        video_url = douyin_mod.get_download_url(url, format_id)
+        if not video_url:
+            raise RuntimeError("未取到下载直链，请重试")
+
+        done = 0
+        with douyin_mod.open_stream(video_url) as resp, open(out, "wb") as f:
+            total_hdr = resp.headers.get("Content-Length")
+            total = int(total_hdr) if total_hdr and total_hdr.isdigit() else None
+            while True:
+                chunk = resp.read(65536)
+                if not chunk:
+                    break
+                f.write(chunk)
+                done += len(chunk)
+                if total:
+                    with _lock:
+                        t = _tasks.get(task_id)
+                        if t:
+                            t["progress"] = int(done * 100 / total)
+        if not out.exists() or out.stat().st_size == 0:
+            raise RuntimeError("下载内容为空")
+
+        filename = out.name
+        if mode == "audio":
+            if not HAS_FFMPEG:
+                raise RuntimeError("服务端未安装 ffmpeg，暂不支持音频提取")
+            audio = out.with_suffix(".m4a")
+            import subprocess
+            subprocess.run(
+                ["ffmpeg", "-y", "-v", "error", "-i", str(out), "-vn",
+                 "-c:a", "copy", str(audio)],
+                check=True, timeout=300,
+            )
+            out.unlink(missing_ok=True)
+            filename = audio.name
+
+        with _lock:
+            t = _tasks.get(task_id)
+            if t:
+                t.update({
+                    "status": "done",
+                    "progress": 100,
+                    "filename": filename,
+                    "filesize": (DOWNLOAD_DIR / filename).stat().st_size,
+                })
+    except Exception as e:
+        with _lock:
+            t = _tasks.get(task_id)
+            if t:
+                t.update({"status": "error", "error": str(e)[:500]})
+
+
 def start_download(url: str, format_id: str = "best", mode: str = "video") -> str:
     task_id = uuid.uuid4().hex[:12]
     with _lock:
@@ -208,7 +273,10 @@ def start_download(url: str, format_id: str = "best", mode: str = "video") -> st
             "error": None,
             "created_at": time.time(),
         }
-    _executor_instance().submit(_run_download, task_id, url, format_id, mode)
+    if is_douyin_url(url):
+        _executor_instance().submit(_run_douyin_download, task_id, url, format_id, mode)
+    else:
+        _executor_instance().submit(_run_download, task_id, url, format_id, mode)
     return task_id
 
 

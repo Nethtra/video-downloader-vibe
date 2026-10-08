@@ -1,0 +1,13 @@
+ttwid OK: 1%7Cb1hfVZPiYgocdyTySKAboBxrBE...
+s_v_web_id OK: verify_rqxqv2go_q8k9_jdjp_p8g6_wlta7xrhurmk
+ERROR: [Douyin] 7692329355342679331: Fresh cookies (not necessarily logged in) are needed
+[FAIL] A: 无 Cookie: ERROR: [Douyin] 7692329355342679331: Fresh cookies (not necessarily logged in) are needed
+ERROR: [Douyin] 7692329355342679331: Fresh cookies (not necessarily logged in) are needed
+[FAIL] B: 仅 ttwid(自动生成): ERROR: [Douyin] 7692329355342679331: Fresh cookies (not necessarily logged in) are needed
+ERROR: [Douyin] 7692329355342679331: Fresh cookies (not necessarily logged in) are needed; please report this issue on  https://github.com/yt-dlp/yt-dlp/issues?q= , filling out the appropriate issue template. Confirm you are on the latest version using  yt-dlp -U
+[FAIL] C: ttwid + s_v_web_id(自动生成): ERROR: [Douyin] 7692329355342679331: Fresh cookies (not necessarily logged in) are needed; please re
+
+=== 结果汇总 ===
+A_无cookie: FAIL
+B_仅ttwid: FAIL
+C_ttwid+s_v_web_id: FAIL

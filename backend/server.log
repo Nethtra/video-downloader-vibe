@@ -1,33 +1,9 @@
-INFO:     Started server process [8440]
+INFO:     Started server process [14980]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
-INFO:     127.0.0.1:4771 - "GET / HTTP/1.1" 200 OK
-INFO:     127.0.0.1:4772 - "GET /assets/index-DnnLsLwK.js HTTP/1.1" 200 OK
-INFO:     127.0.0.1:4773 - "POST /api/analyze HTTP/1.1" 200 OK
-INFO:     127.0.0.1:13768 - "GET / HTTP/1.1" 200 OK
-INFO:     127.0.0.1:13768 - "GET /assets/index-DnnLsLwK.js HTTP/1.1" 200 OK
-INFO:     127.0.0.1:13769 - "GET /assets/index-SnZ29-sw.css HTTP/1.1" 200 OK
-INFO:     127.0.0.1:13769 - "GET /api/plans HTTP/1.1" 200 OK
-INFO:     127.0.0.1:13770 - "GET /favicon.svg HTTP/1.1" 200 OK
-INFO:     127.0.0.1:11969 - "GET / HTTP/1.1" 200 OK
-INFO:     127.0.0.1:11969 - "GET /assets/index-DnnLsLwK.js HTTP/1.1" 200 OK
-INFO:     127.0.0.1:9130 - "GET /assets/index-SnZ29-sw.css HTTP/1.1" 200 OK
-INFO:     127.0.0.1:9130 - "GET /api/plans HTTP/1.1" 200 OK
-INFO:     127.0.0.1:9130 - "GET /favicon.svg HTTP/1.1" 200 OK
-INFO:     127.0.0.1:10562 - "POST /api/pay/order HTTP/1.1" 200 OK
-INFO:     127.0.0.1:10562 - "GET /api/pay/order/RD5A508D3271048 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:10562 - "GET /api/pay/order/RD5A508D3271048 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:10562 - "POST /api/pay/order HTTP/1.1" 200 OK
-INFO:     127.0.0.1:10562 - "POST /api/pay/mock/confirm HTTP/1.1" 200 OK
-INFO:     127.0.0.1:10562 - "GET /api/pay/order/R311E9E9C812A43 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:10562 - "POST /api/pay/order HTTP/1.1" 200 OK
-INFO:     127.0.0.1:10562 - "POST /api/pay/mock/confirm HTTP/1.1" 200 OK
-INFO:     127.0.0.1:10562 - "GET /api/pay/order/R045837CBAC5844 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:5288 - "POST /api/analyze HTTP/1.1" 200 OK
-INFO:     127.0.0.1:6171 - "POST /api/download HTTP/1.1" 200 OK
-[download]   0.0% of    6.05MiB at  332.46KiB/s ETA 00:18[download]   0.0% of    6.05MiB at  808.46KiB/s ETA 00:07[download]   0.1% of    6.05MiB at    1.68MiB/s ETA 00:03[download]   0.2% of    6.05MiB at    3.15MiB/s ETA 00:01INFO:     127.0.0.1:6171 - "GET /api/task/5734577d4a42 HTTP/1.1" 200 OK
-[download]   0.5% of    6.05MiB at  745.13KiB/s ETA 00:08[download]   1.0% of    6.05MiB at  821.65KiB/s ETA 00:07[download]   2.1% of    6.05MiB at    1.02MiB/s ETA 00:05[download]   4.1% of    6.05MiB at    1.45MiB/s ETA 00:03[download]   8.3% of    6.05MiB at    2.27MiB/s ETA 00:02[download]  16.5% of    6.05MiB at    2.36MiB/s ETA 00:02[download]  33.1% of    6.05MiB at    1.95MiB/s ETA 00:02INFO:     127.0.0.1:6171 - "GET /api/task/5734577d4a42 HTTP/1.1" 200 OK
-[download]  60.6% of    6.05MiB at    2.05MiB/s ETA 00:01INFO:     127.0.0.1:6171 - "GET /api/task/5734577d4a42 HTTP/1.1" 200 OK
-[download]  96.5% of    6.05MiB at    2.08MiB/s ETA 00:00[download] 100.0% of    6.05MiB at    1.99MiB/s ETA 00:00[download] 100% of    6.05MiB in 00:00:03 at 1.82MiB/s                                                         INFO:     127.0.0.1:6171 - "GET /api/task/5734577d4a42 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:6171 - "GET /api/file/5734577d4a42 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:3942 - "POST /api/analyze HTTP/1.1" 200 OK
+INFO:     127.0.0.1:3950 - "POST /api/analyze HTTP/1.1" 200 OK
+INFO:     127.0.0.1:3957 - "POST /api/analyze HTTP/1.1" 200 OK
+INFO:     127.0.0.1:3969 - "POST /api/download HTTP/1.1" 200 OK
+INFO:     127.0.0.1:9137 - "GET /api/task/7a14d0312620 HTTP/1.1" 200 OK

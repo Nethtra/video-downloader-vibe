@@ -28,8 +28,8 @@ async function analyze() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url: url.value.trim() }),
     })
-    const data = await res.json()
-    if (!res.ok) throw new Error(data.detail || '解析失败，请稍后再试')
+    const data = await readJson(res)
+    if (!res.ok) throw new Error(data.detail || data.message || '解析失败，请稍后再试')
     info.value = data
     const best = data.formats.find(f => f.height > 0) || data.formats[0]
     selectedFormat.value = best ? best.format_id : ''
@@ -37,6 +37,16 @@ async function analyze() {
     errorMsg.value = e.message
   } finally {
     analyzing.value = false
+  }
+}
+
+async function readJson(res) {
+  const text = await res.text()
+  try {
+    return JSON.parse(text)
+  } catch {
+    throw new Error(res.ok ? '服务响应异常，请稍后重试'
+      : `服务暂时不可用（${res.status}），请稍后重试`)
   }
 }
 
@@ -51,7 +61,7 @@ async function startDownload() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url: info.value.webpage_url, format_id: fid, mode }),
     })
-    const data = await res.json()
+    const data = await readJson(res)
     if (!res.ok) throw new Error(data.detail || '创建下载任务失败')
     task.value = { task_id: data.task_id, status: 'downloading', progress: 0 }
     pollTimer = setInterval(pollTask, 1200)
