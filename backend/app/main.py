@@ -66,7 +66,12 @@ def analyze_status(analyze_id: str):
     if task["status"] == "error":
         err = task["error"] or ""
         if "confirm your age" in err:
-            hint = "该视频有年龄限制，YouTube 要求登录验证，暂不支持此类视频"
+            if downloader.COOKIES_FILE.exists():
+                hint = ("该视频有年龄限制，已尝试站点配置的 YouTube Cookie 仍被拒绝："
+                        "Cookie 可能已过期，或账号未通过 YouTube 年龄验证，请站长更新 cookies.txt")
+            else:
+                hint = ("该视频有年龄限制，YouTube 要求登录验证；"
+                        "站长在 backend/cookies/cookies.txt 配置账号 Cookie 后即可支持此类视频")
         elif "not a bot" in err or "Sign in to confirm" in err:
             hint = "YouTube 风控拦截了服务器请求，请稍后重试"
         elif "Private" in err or "login" in err.lower():
@@ -81,7 +86,7 @@ def analyze_status(analyze_id: str):
             # 兜底也透出真实原因片段（截断），便于远程定位网络/风控类问题
             brief = re.sub(r"\s+", " ", err.replace("ERROR:", "")).strip()[:120]
             hint = f"解析失败：{brief}" if brief else "解析失败，请确认链接是否正确、视频是否公开可见"
-        return {"status": "error", "detail": hint}
+        return {"status": "error", "detail": hint, "raw": re.sub(r"\s+", " ", err)[:200]}
     return {"status": "done", "info": task["result"]}
 
 

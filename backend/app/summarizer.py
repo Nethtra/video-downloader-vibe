@@ -252,35 +252,36 @@ SYSTEM_PROMPT = """你是视频内容总结助手。根据给定的素材（视�
 
 # ---------- 字幕提取（保留时间线） ----------
 
-_MANUAL_LANG_PRIORITY = ["zh-Hans", "zh-CN", "zh", "yue", "en"]
-_AUTO_LANG_PRIORITY = ["ai-zh", "ai_zh", "zh-Hans", "zh-CN", "zh", "en"]
+def _subtitle_lang_rank(lang: str, video_lang: str) -> tuple:
+    """字幕语言排序分（越小越优）：中文系 > 视频原语言 > 英文 > 其它；同组内非 -orig 优先。"""
+    l = str(lang).lower()
+    v = (video_lang or "").lower()
+    if l in ("zh-hans", "zh-cn", "zh", "yue") or l.startswith("zh") or l == "ai-zh":
+        group = 0
+    elif v and (l == v or l.startswith(v)):
+        group = 1
+    elif l.startswith("en"):
+        group = 2
+    else:
+        group = 3
+    orig_penalty = 1 if "-orig" in l else 0
+    return (group, orig_penalty, l)
 
 
 def _pick_subtitle(info: dict) -> tuple | None:
     """从 info 的字幕字典里挑一条最优：手动字幕优先于自动字幕，
-    中文优先于英文。返回 (url, ext) 或 None。"""
-    for store, priority in (
-        (info.get("subtitles") or {}, _MANUAL_LANG_PRIORITY),
-        (info.get("automatic_captions") or {}, _AUTO_LANG_PRIORITY),
-    ):
+    语言优先级：中文 > 视频原语言（如日语视频选 ja）> 英文 > 其它。
+    任何语言都能交给大模型总结，因此保底选任意可用轨道。
+    返回 (url, ext) 或 None。"""
+    video_lang = str(info.get("language") or "").lower()
+    for store in (info.get("subtitles") or {}, info.get("automatic_captions") or {}):
         if not store:
             continue
-        for lang in priority:
+        ranked = sorted(store.keys(), key=lambda l: _subtitle_lang_rank(l, video_lang))
+        for lang in ranked:
             cand = _first_usable(store.get(lang) or [])
             if cand:
                 return cand
-        for lang, entries in store.items():
-            if "-orig" in lang:
-                continue
-            if any(lang.startswith(p) for p in priority):
-                cand = _first_usable(entries)
-                if cand:
-                    return cand
-        for lang, entries in store.items():
-            if "zh" in lang.lower():
-                cand = _first_usable(entries)
-                if cand:
-                    return cand
     return None
 
 
@@ -301,18 +302,38 @@ def _first_usable(entries: list) -> tuple | None:
 
 
 def _http_get_text(url: str, referer: str) -> str:
-    """GET 字幕内容：先走默认网络栈（系统代理开启时国外 CDN 可通），
-    失败退直连兜底。伪装 UA/Referer 以通过站点校验。"""
+    """GET 字幕内容。opener 尝试顺序：
+    1. 自动探测到的系统代理（_get_proxy()，如注册表里的 Clash，国外 CDN 必需）
+    2. 默认网络栈（环境变量代理）
+    3. 直连兜底
+    遇到 429（YouTube timedtext 限流）退避重试。伪装 UA/Referer。"""
     headers = {"User-Agent": _BROWSER_UA, "Referer": referer}
+
+    def _openers():
+        ops = []
+        sys_proxy = _get_proxy()
+        if sys_proxy:
+            ops.append(urllib.request.build_opener(urllib.request.ProxyHandler(
+                {"http": sys_proxy, "https": sys_proxy})))
+        ops += [_default_opener, _direct_opener]
+        return ops
+
     last_err = None
-    for opener in (_default_opener, _direct_opener):
-        try:
-            req = urllib.request.Request(url, headers=headers)
-            with opener.open(req, timeout=25) as r:
-                return r.read().decode("utf-8", "ignore")
-        except Exception as e:
-            last_err = e
-    raise RuntimeError(f"字幕下载失败（{type(last_err).__name__}）")
+    for attempt in range(3):  # 共 3 轮；429 时退避
+        for opener in _openers():
+            try:
+                req = urllib.request.Request(url, headers=headers)
+                with opener.open(req, timeout=25) as r:
+                    return r.read().decode("utf-8", "ignore")
+            except urllib.error.HTTPError as e:
+                last_err = e
+                if e.code == 429:
+                    break  # 换下一轮退避重试（该出口被限流，立即换 opener 意义不大）
+            except Exception as e:
+                last_err = e
+        if attempt < 2:
+            time.sleep(3 + attempt * 3)
+    raise RuntimeError(f"字幕下载失败（{type(last_err).__name__}: {last_err}），请稍后重试")
 
 
 _TIME_LINE = re.compile(r"^\s*(\d{1,2}:)?\d{1,2}:\d{2}[.,]\d{3}\s*-->\s*", re.M)
