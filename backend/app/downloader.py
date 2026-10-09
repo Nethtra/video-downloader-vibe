@@ -15,23 +15,49 @@ HAS_FFMPEG = shutil.which("ffmpeg") is not None
 # 新版 yt-dlp 解析 YouTube 需要 JS 运行时（解 n-challenge 签名），
 # 并建议启用官方远程挑战求解脚本，否则格式缺失/签名失败。
 os.environ.pop("NODE_OPTIONS", None)  # 剔除宿主注入的 node 启动参数（会限制 fs 权限导致求解脚本报错）
+# 清除会话注入的代理环境变量（WorkBuddy 每个会话注入的代理端口都不同且不稳定）。
+# 清掉后 yt-dlp 的代理解析链会落到 Windows 注册表系统代理（用户自己的代理软件，
+# 稳定可控）；若服务器需要指定代理，用 backend/proxy.txt。
+for _k in ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "all_proxy"):
+    os.environ.pop(_k, None)
+
+
+def _node_version(path: str) -> tuple[int, int]:
+    """读取 node 版本号（EJS/签名求解对 node 版本敏感：v20 实测失败、v22 通过）。"""
+    try:
+        import re
+        import subprocess
+        out = subprocess.run([path, "--version"], capture_output=True, text=True, timeout=10)
+        m = re.match(r"v(\d+)\.(\d+)", (out.stdout or "").strip())
+        if m:
+            return int(m.group(1)), int(m.group(2))
+    except Exception:
+        pass
+    return (0, 0)
 
 
 def _find_node() -> str | None:
-    """定位 node：PATH → Windows 常见位置 → WorkBuddy 托管目录。"""
-    found = shutil.which("node")
-    if found:
-        return found
+    """定位 node：PATH → Windows 常见位置 → WorkBuddy 托管目录。
+    多个 node 共存时选版本最高的（不能拿第一个就用：系统 node 20 会让
+    YouTube 签名求解静默失败，表现为年龄限制视频被 18+ 墙拦截）。"""
     import glob
-    candidates = [
+    found = shutil.which("node")
+    candidates = [found] if found else []
+    candidates += [
         r"C:\Program Files\nodejs\node.exe",
         os.path.expanduser(r"~\.workbuddy\binaries\node\versions\*\node.exe"),
     ]
+    best, best_ver, seen = None, (0, 0), set()
     for pattern in candidates:
-        for path in sorted(glob.glob(pattern), reverse=True):
-            if os.path.isfile(path):
-                return path
-    return None
+        paths = sorted(glob.glob(pattern), reverse=True) if "*" in pattern else [pattern]
+        for path in paths:
+            if path in seen or not os.path.isfile(path):
+                continue
+            seen.add(path)
+            ver = _node_version(path)
+            if ver > best_ver:
+                best, best_ver = path, ver
+    return best
 
 
 _node_path = _find_node()
@@ -92,6 +118,23 @@ def _apply_cookies(opts: dict):
     抖音走 douyin.py 自研免 Cookie 通道，不依赖此文件。"""
     if COOKIES_ENABLED_MARKER.exists() and COOKIES_FILE.exists():
         opts["cookiefile"] = str(COOKIES_FILE)
+
+
+def _is_age_gate(err: str) -> bool:
+    """YouTube 年龄墙：服务端强制要求已登录且通过年龄验证的账号会话，
+    匿名通道（含 tv_embedded/web_embedded 等所有 player_client）实测全部被拦。"""
+    return "confirm your age" in (err or "").lower()
+
+
+def _maybe_cookie_retry(opts: dict) -> dict | None:
+    """命中年龄墙且站长配置了 cookies.txt 时，返回带 Cookie 的重试配置。
+    Cookie 只在此时启用（定向降级），普通视频仍匿名解析，
+    避免过期访客 Cookie 导致的 360p 降级问题。"""
+    if COOKIES_FILE.exists():
+        retry = dict(opts)
+        retry["cookiefile"] = str(COOKIES_FILE)
+        return retry
+    return None
 
 _tasks = {}
 _lock = threading.Lock()
@@ -198,6 +241,16 @@ def analyze(url: str) -> dict:
             break
         except Exception as e:
             last_err = e
+            # 年龄墙定向降级：匿名被拦且站长配置了 cookies.txt 时，带 Cookie 再试一次
+            if _is_age_gate(str(e)):
+                cookie_opts = _maybe_cookie_retry(opts)
+                if cookie_opts:
+                    try:
+                        with yt_dlp.YoutubeDL(cookie_opts) as ydl:
+                            info = ydl.extract_info(url, download=False)
+                        break
+                    except Exception as e2:
+                        last_err = e2
             continue
     if info is None:
         raise last_err  # 交给路由层转可读中文
@@ -325,8 +378,8 @@ def _run_download(task_id: str, url: str, format_id: str, mode: str):
     if proxy:
         opts["proxy"] = proxy
 
-    try:
-        with yt_dlp.YoutubeDL(opts) as ydl:
+    def _attempt_download(o: dict):
+        with yt_dlp.YoutubeDL(o) as ydl:
             ydl.extract_info(url, download=True)
         # 找到实际产物文件
         produced = sorted(DOWNLOAD_DIR.glob(f"{task_id}.*"))
@@ -336,23 +389,43 @@ def _run_download(task_id: str, url: str, format_id: str, mode: str):
                 final = p
         if final is None and produced:
             final = produced[-1]
+        return final
+
+    def _mark_done(final):
         with _lock:
             task = _tasks.get(task_id)
             if task:
-                if final:
-                    task.update({
-                        "status": "done",
-                        "progress": 100,
-                        "filename": final.name,
-                        "filesize": final.stat().st_size,
-                    })
-                else:
-                    task.update({"status": "error", "error": "下载完成但未找到产物文件"})
-    except Exception as e:
+                task.update({
+                    "status": "done",
+                    "progress": 100,
+                    "filename": final.name,
+                    "filesize": final.stat().st_size,
+                })
+
+    def _mark_error(e: Exception):
         with _lock:
             task = _tasks.get(task_id)
             if task:
                 task.update({"status": "error", "error": str(e)[:500]})
+
+    try:
+        final = _attempt_download(opts)
+        if final is None:
+            raise RuntimeError("下载完成但未找到产物文件")
+        _mark_done(final)
+    except Exception as e:
+        # 年龄墙定向降级：匿名被拦且站长配置了 cookies.txt 时，带 Cookie 再试一次
+        cookie_opts = _maybe_cookie_retry(opts) if _is_age_gate(str(e)) else None
+        if cookie_opts:
+            try:
+                final = _attempt_download(cookie_opts)
+                if final is None:
+                    raise RuntimeError("下载完成但未找到产物文件")
+                _mark_done(final)
+            except Exception as e2:
+                _mark_error(e2)
+        else:
+            _mark_error(e)
 
 
 def _run_douyin_download(task_id: str, url: str, format_id: str, mode: str):
