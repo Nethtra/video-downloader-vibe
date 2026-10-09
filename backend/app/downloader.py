@@ -58,10 +58,28 @@ COOKIES_ENABLED_MARKER = BASE_DIR / "cookies" / "enabled"
 
 
 def _get_proxy() -> str | None:
+    """代理解析优先级：
+    1. backend/proxy.txt（站长显式指定，每行一个地址）
+    2. Windows 系统代理（注册表，如 Clash/v2ray 开启系统代理后写入的 127.0.0.1:xxxx）
+    3. 都没有则返回 None（用环境默认）
+    显式返回注册表代理很重要：沙箱/某些终端会注入不可用的 http_proxy 环境变量，
+    显式指定可覆盖环境变量，保证走真正可用的系统代理。"""
     try:
         if PROXY_FILE.exists():
             value = PROXY_FILE.read_text(encoding="utf-8").strip()
-            return value or None
+            if value:
+                return value.splitlines()[0].strip()
+    except OSError:
+        pass
+    try:
+        import winreg
+        k = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                           r"Software\Microsoft\Windows\CurrentVersion\Internet Settings")
+        enable, _ = winreg.QueryValueEx(k, "ProxyEnable")
+        if enable:
+            server, _ = winreg.QueryValueEx(k, "ProxyServer")
+            if server and "=" not in server:  # 简单格式 127.0.0.1:5933
+                return f"http://{server}"
     except OSError:
         pass
     return None
@@ -132,30 +150,57 @@ def get_analyze_task(analyze_id: str) -> dict | None:
 
 
 def analyze(url: str) -> dict:
-    """解析视频信息，返回标题、封面、可选清晰度列表等。"""
+    """解析视频信息，返回标题、封面、可选清晰度列表等。
+    增强配置（JS 运行时/远程求解）失败时自动回退原始配置，保证不比改造前差。"""
     if is_douyin_url(url):
         return douyin_mod.analyze(url)
-    opts = {
-        "quiet": True,
-        "no_warnings": True,
-        "skip_download": True,
-        "noplaylist": True,
-    }
-    _apply_cookies(opts)
-    opts.update(YTDLP_ENHANCEMENTS)
-    proxy = _get_proxy()
-    if proxy:
-        opts["proxy"] = proxy
+
+    def _base_opts():
+        return {
+            "quiet": True,
+            "no_warnings": True,
+            "skip_download": True,
+            "noplaylist": True,
+            # 防止代理挂起时无限卡死（快速失败转可读报错）
+            "socket_timeout": 30,
+            "retries": 2,
+        }
+
+    def _variants():
+        """尝试序列：完整增强 → 原始配置（ej 求解组件需联网下载，无代理环境可能失败）。"""
+        base = _base_opts()
+        _apply_cookies(base)
+        base.update(YTDLP_ENHANCEMENTS)
+        proxy = _get_proxy()
+        if proxy:
+            base["proxy"] = proxy
+        bare = _base_opts()
+        _apply_cookies(bare)
+        if proxy:
+            bare["proxy"] = proxy
+        # 配置相同（无增强可用）时只试一次
+        return [base] if base == bare else [base, bare]
+
+    last_err = None
     info = None
-    for attempt in range(3):
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-        # YouTube 的 SABR 限制按请求随机下发：偶尔只给 360p 渐进式。
-        # 现代视频几乎都有 ≥720p，检测到"疑似被降级"就重试（新请求会换访客身份）。
-        heights = [f.get("height") or 0 for f in (info.get("formats") or [])
-                   if f.get("vcodec") != "none"]
-        if max(heights or [0]) >= 480 or attempt == 2:
+    for opts in _variants():
+        try:
+            info = None
+            for attempt in range(3):
+                with yt_dlp.YoutubeDL(opts) as ydl:
+                    info = ydl.extract_info(url, download=False)
+                # YouTube 的 SABR 限制按请求随机下发：偶尔只给 360p 渐进式。
+                # 现代视频几乎都有 ≥720p，检测到"疑似被降级"就重试（新请求会换访客身份）。
+                heights = [f.get("height") or 0 for f in (info.get("formats") or [])
+                           if f.get("vcodec") != "none"]
+                if max(heights or [0]) >= 480 or attempt == 2:
+                    break
             break
+        except Exception as e:
+            last_err = e
+            continue
+    if info is None:
+        raise last_err  # 交给路由层转可读中文
 
     # 整理可选格式：按分辨率分组，每个分辨率取最优 mp4 优先项
     candidates = {}

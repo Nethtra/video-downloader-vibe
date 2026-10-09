@@ -78,7 +78,9 @@ def analyze_status(analyze_id: str):
         elif "网络请求失败" in err or "超时" in err or "timed out" in err.lower():
             hint = "解析超时或网络不稳定，请稍后重试"
         else:
-            hint = "解析失败，请确认链接是否正确、视频是否公开可见"
+            # 兜底也透出真实原因片段（截断），便于远程定位网络/风控类问题
+            brief = re.sub(r"\s+", " ", err.replace("ERROR:", "")).strip()[:120]
+            hint = f"解析失败：{brief}" if brief else "解析失败，请确认链接是否正确、视频是否公开可见"
         return {"status": "error", "detail": hint}
     return {"status": "done", "info": task["result"]}
 
@@ -142,6 +144,7 @@ def query_order(order_id: str):
 
 class SummaryReq(BaseModel):
     url: str
+    bili_cookie: str = ""  # 用户自带 B站 Cookie（BibiGPT 模式，仅当次请求使用，不落盘）
 
 
 def _extract_url(text: str) -> str:
@@ -167,7 +170,7 @@ def create_summary(req: SummaryReq, request: Request):
     if not url:
         raise HTTPException(400, "请输入视频链接（或包含链接的分享口令）")
     try:
-        return {"task_id": summarizer.start_summary(url, _client_ip(request))}
+        return {"task_id": summarizer.start_summary(url, _client_ip(request), req.bili_cookie)}
     except RuntimeError as e:
         raise HTTPException(400, str(e))
     except downloader.yt_dlp.utils.DownloadError:

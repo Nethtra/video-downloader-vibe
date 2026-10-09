@@ -190,9 +190,19 @@ const streamText = ref('')      // 流式原始输出（AI 总结 tab 实时显�
 const summaryData = ref(null)   // done 后的结构化结果
 const transcript = ref([])      // 字幕时间线 [{time, text}]
 const quota = ref(null)         // {used, limit, remaining}
+const showCookieCfg = ref(false)
+const biliCookie = ref(localStorage.getItem('bili_sessdata') || '')
 let es = null                   // EventSource
 let pollFallbackTimer = null
 let pollElapsed = 0
+
+function saveBiliCookie() {
+  if (biliCookie.value.trim()) {
+    localStorage.setItem('bili_sessdata', biliCookie.value.trim())
+  } else {
+    localStorage.removeItem('bili_sessdata')
+  }
+}
 
 const summaryBusy = computed(() =>
   !!summaryTask.value && ['fetching_subtitles', 'summarizing'].includes(summaryTask.value.status)
@@ -244,7 +254,10 @@ async function startSummary() {
     const res = await fetch('/api/summary', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: info.value.webpage_url }),
+      body: JSON.stringify({
+        url: info.value.webpage_url,
+        bili_cookie: localStorage.getItem('bili_sessdata') || '',
+      }),
     })
     const data = await readJson(res)
     if (!res.ok) throw new Error(data.detail || '创建总结任务失败')
@@ -502,6 +515,19 @@ onBeforeUnmount(() => {
               <span v-if="summaryBusy" class="spinner"></span>{{ summaryPhaseText }}
             </button>
             <span v-if="quota" class="quota-tip">今日免费 {{ quota.remaining }}/{{ quota.limit }} 次</span>
+            <button class="cookie-toggle" title="配置B站Cookie，解锁AI字幕" @click="showCookieCfg = !showCookieCfg">
+              ⚙ 字幕设置
+            </button>
+          </div>
+          <div v-if="showCookieCfg" class="cookie-cfg">
+            <p class="cookie-tip">
+              可选：粘贴你自己的 <b>B站 SESSDATA</b> Cookie，即可对有AI字幕的视频生成高质量总结（B站要求登录才能读取AI字幕）。
+              Cookie 仅保存在<b>你的浏览器</b>，总结时随请求传给服务器用完即弃，服务端不存储。获取方式：登录B站 → F12 → 应用 → Cookies → 复制 SESSDATA 的值。
+            </p>
+            <div class="cookie-row">
+              <input v-model="biliCookie" class="cookie-input" type="password" placeholder="粘贴 SESSDATA 值（留空则不使用AI字幕）" />
+              <button class="btn btn-sm" @click="saveBiliCookie">{{ biliCookie ? '已保存 ✓' : '保存' }}</button>
+            </div>
           </div>
           <p v-if="summaryMsg" class="error-tip">{{ summaryMsg }}</p>
 
@@ -1221,6 +1247,34 @@ export default {
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 .quota-tip { color: var(--text-3); font-size: 12.5px; }
+.cookie-toggle {
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--text-2);
+  font-size: 12.5px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  margin-left: auto;
+}
+.cookie-toggle:hover { color: var(--primary); border-color: var(--primary); }
+.cookie-cfg {
+  margin-top: 12px;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+.cookie-tip { color: var(--text-2); font-size: 12.5px; line-height: 1.7; }
+.cookie-row { display: flex; gap: 8px; margin-top: 8px; }
+.cookie-input {
+  flex: 1;
+  height: 36px;
+  border: 1.5px solid var(--border);
+  border-radius: 8px;
+  padding: 0 12px;
+  font-size: 13px;
+  outline: none;
+}
+.cookie-input:focus { border-color: var(--primary); }
 
 .summary-panel {
   margin-top: 16px;
