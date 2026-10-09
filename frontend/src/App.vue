@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, watch, nextTick, onBeforeUnmount } from 'vue'
+import MindMap from './components/MindMap.vue'
 
 /* ---------------- 分析与下载 ---------------- */
 const url = ref('')
@@ -30,9 +31,21 @@ async function analyze() {
     })
     const data = await readJson(res)
     if (!res.ok) throw new Error(data.detail || data.message || '解析失败，请稍后再试')
-    info.value = data
-    const best = data.formats.find(f => f.height > 0) || data.formats[0]
-    selectedFormat.value = best ? best.format_id : ''
+    // 轮询解析结果（YouTube 等平台解析较慢，后端异步执行）
+    const analyzeId = data.analyze_id
+    for (let i = 0; i < 100; i++) {
+      await new Promise(r => setTimeout(r, 1500))
+      const sres = await fetch(`/api/analyze/${analyzeId}`)
+      const sdata = await readJson(sres)
+      if (!sres.ok) throw new Error(sdata.detail || '解析状态查询失败')
+      if (sdata.status === 'running') continue
+      if (sdata.status === 'error') throw new Error(sdata.detail || '解析失败')
+      info.value = sdata.info
+      const best = sdata.info.formats.find(f => f.height > 0) || sdata.info.formats[0]
+      selectedFormat.value = best ? best.format_id : ''
+      return
+    }
+    throw new Error('解析超时，请稍后重试')
   } catch (e) {
     errorMsg.value = e.message
   } finally {
@@ -168,6 +181,191 @@ function closePay() {
   clearInterval(payPoll)
 }
 
+/* ---------------- AI 视频总结 v2（SSE 流式 + 页内选项卡） ---------------- */
+const summaryTask = ref(null)   // {status, basis, title, webpage_url, ...}
+const summaryPanel = ref(false) // 结果卡下方面板
+const activeTab = ref('ai')     // ai | timeline | mindmap
+const summaryMsg = ref('')
+const streamText = ref('')      // 流式原始输出（AI 总结 tab 实时显示）
+const summaryData = ref(null)   // done 后的结构化结果
+const transcript = ref([])      // 字幕时间线 [{time, text}]
+const quota = ref(null)         // {used, limit, remaining}
+let es = null                   // EventSource
+let pollFallbackTimer = null
+let pollElapsed = 0
+
+const summaryBusy = computed(() =>
+  !!summaryTask.value && ['fetching_subtitles', 'summarizing'].includes(summaryTask.value.status)
+)
+
+const summaryPhaseText = computed(() => {
+  if (!summaryTask.value || !summaryBusy.value) return '✨ AI 总结'
+  return {
+    fetching_subtitles: '正在提取字幕…',
+    summarizing: 'AI 总结中…',
+  }[summaryTask.value.status] || 'AI 总结中…'
+})
+
+const basisLabel = computed(() => {
+  const b = summaryTask.value?.basis
+  if (!b) return ''
+  return b === 'subtitles' ? '基于字幕总结' : '基于视频信息总结'
+})
+
+async function loadQuota() {
+  try {
+    const r = await fetch('/api/summary/quota')
+    if (r.ok) quota.value = await r.json()
+  } catch { /* 忽略 */ }
+}
+
+function resetSummaryState() {
+  summaryTask.value = null
+  summaryPanel.value = false
+  summaryMsg.value = ''
+  streamText.value = ''
+  summaryData.value = null
+  transcript.value = []
+  closeSummaryStream()
+  clearInterval(pollFallbackTimer)
+}
+
+function closeSummaryStream() {
+  if (es) { es.close(); es = null }
+}
+
+async function startSummary() {
+  if (!info.value || summaryBusy.value) return
+  summaryMsg.value = ''
+  streamText.value = ''
+  summaryData.value = null
+  transcript.value = []
+  try {
+    const res = await fetch('/api/summary', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: info.value.webpage_url }),
+    })
+    const data = await readJson(res)
+    if (!res.ok) throw new Error(data.detail || '创建总结任务失败')
+    summaryTask.value = { status: 'fetching_subtitles', webpage_url: info.value.webpage_url }
+    summaryPanel.value = true
+    activeTab.value = 'ai'
+    openSummaryStream(data.task_id)
+  } catch (e) {
+    summaryMsg.value = e.message
+  }
+}
+
+function openSummaryStream(taskId) {
+  closeSummaryStream()
+  es = new EventSource(`/api/summary/${taskId}/stream`)
+
+  es.addEventListener('meta', (e) => {
+    try { Object.assign(summaryTask.value, JSON.parse(e.data)) } catch { /* 忽略 */ }
+  })
+
+  es.addEventListener('delta', (e) => {
+    try { streamText.value += JSON.parse(e.data).t } catch { /* 忽略 */ }
+  })
+
+  es.addEventListener('done', (e) => {
+    try {
+      const d = JSON.parse(e.data)
+      Object.assign(summaryTask.value, { status: 'done', ...d })
+      summaryData.value = d.result || {}
+      transcript.value = d.transcript || []
+    } catch { /* 忽略 */ }
+    closeSummaryStream()
+    loadQuota()
+  })
+
+  // 服务端业务错误（带 data 的 error 事件）
+  es.addEventListener('error', (e) => {
+    if (!e.data) return // 无 data = 连接层错误，交给 onerror 处理
+    let msg = '总结失败，请稍后重试'
+    try { msg = JSON.parse(e.data).error || msg } catch { /* 忽略 */ }
+    summaryMsg.value = msg
+    summaryTask.value = { ...(summaryTask.value || {}), status: 'error' }
+    closeSummaryStream()
+    loadQuota()
+  })
+
+  // 连接层错误：若还没拿到结果，回退到轮询兜底
+  es.onerror = () => {
+    if (summaryTask.value?.status === 'done') { closeSummaryStream(); return }
+    closeSummaryStream()
+    startPollFallback(taskId)
+  }
+}
+
+function startPollFallback(taskId) {
+  pollElapsed = 0
+  clearInterval(pollFallbackTimer)
+  pollFallbackTimer = setInterval(async () => {
+    pollElapsed += 2
+    if (pollElapsed > 120) {
+      clearInterval(pollFallbackTimer)
+      summaryMsg.value = '总结超时，请稍后重试'
+      summaryTask.value = { ...(summaryTask.value || {}), status: 'error' }
+      return
+    }
+    try {
+      const res = await fetch(`/api/summary/${taskId}`)
+      if (!res.ok) return
+      const d = await res.json()
+      summaryTask.value = d
+      if (d.status === 'done') {
+        clearInterval(pollFallbackTimer)
+        summaryData.value = d.result || {}
+        transcript.value = d.transcript || []
+        loadQuota()
+      } else if (d.status === 'error') {
+        clearInterval(pollFallbackTimer)
+        summaryMsg.value = d.error || '总结失败，请稍后重试'
+      }
+    } catch { /* 下一轮重试 */ }
+  }, 2000)
+}
+
+function fmtTime(sec) {
+  const m = Math.floor(sec / 60)
+  const s = Math.round(sec % 60)
+  return `${m}:${String(s).padStart(2, '0')}`
+}
+
+function chapterHref(time) {
+  const u = summaryTask.value?.webpage_url || info.value?.webpage_url || ''
+  if (/bilibili\.com|youtube\.com/.test(u)) {
+    return u + (u.includes('?') ? '&' : '?') + 't=' + (time | 0)
+  }
+  return u
+}
+
+async function copySummary() {
+  const r = summaryData.value
+  if (!r) return
+  const lines = [r.overview, '', ...r.points.map(p => `· ${p}`), '']
+  if (r.chapters?.length) {
+    lines.push('章节大纲：')
+    r.chapters.forEach(c => lines.push(`  [${c.label}] ${c.title}${c.detail ? ' — ' + c.detail : ''}`))
+    lines.push('')
+  }
+  lines.push(`来自「极易下」AI 视频总结：${summaryTask.value?.webpage_url || ''}`)
+  try {
+    await navigator.clipboard.writeText(lines.join('\n'))
+    alert('总结已复制到剪贴板')
+  } catch {
+    alert('复制失败，请手动选择文本复制')
+  }
+}
+
+// 追加式钩子：info 变化时联动总结状态（不动 analyze/reset 原有逻辑）
+watch(info, (v) => {
+  resetSummaryState()
+  if (v) loadQuota()
+})
+
 /* ---------------- 工具函数 ---------------- */
 function fmtDuration(sec) {
   if (!sec) return ''
@@ -230,6 +428,8 @@ watch([payModal, payOrder, payState], () => nextTick(drawQr))
 onBeforeUnmount(() => {
   clearInterval(pollTimer)
   clearInterval(payPoll)
+  clearInterval(pollFallbackTimer)
+  closeSummaryStream()
 })
 </script>
 
@@ -295,6 +495,68 @@ onBeforeUnmount(() => {
             <span v-if="info.uploader">{{ info.uploader }}</span>
             <span v-if="info.duration">时长 {{ fmtDuration(info.duration) }}</span>
           </p>
+
+          <!-- AI 视频总结（新增） -->
+          <div class="ai-row">
+            <button class="btn ai-btn" :disabled="summaryBusy" @click="startSummary">
+              <span v-if="summaryBusy" class="spinner"></span>{{ summaryPhaseText }}
+            </button>
+            <span v-if="quota" class="quota-tip">今日免费 {{ quota.remaining }}/{{ quota.limit }} 次</span>
+          </div>
+          <p v-if="summaryMsg" class="error-tip">{{ summaryMsg }}</p>
+
+          <!-- 总结面板（页内选项卡，SSE 流式） -->
+          <div v-if="summaryPanel" class="summary-panel">
+            <div class="summary-tabs">
+              <button class="stab" :class="{ active: activeTab === 'ai' }" @click="activeTab = 'ai'">📝 AI 总结</button>
+              <button class="stab" :class="{ active: activeTab === 'timeline' }" @click="activeTab = 'timeline'">⏱ 字幕时间线</button>
+              <button class="stab" :class="{ active: activeTab === 'mindmap' }" @click="activeTab = 'mindmap'">🧠 思维导图</button>
+              <span class="stab-right">
+                <span v-if="basisLabel" class="basis-badge" :class="summaryTask?.basis" :title="summaryTask?.basis === 'subtitles' ? '基于视频字幕生成，内容较完整' : '该平台无可用字幕，基于标题简介生成，内容较简略'">{{ basisLabel }}</span>
+                <button v-if="summaryData" class="link-btn copy-link" @click="copySummary">复制全文</button>
+              </span>
+            </div>
+
+            <div class="summary-content">
+              <!-- AI 总结 -->
+              <template v-if="activeTab === 'ai'">
+                <pre v-if="!summaryData" class="stream-box">{{ streamText || '正在准备素材…' }}</pre>
+                <template v-else>
+                  <p class="summary-line">{{ summaryData.overview }}</p>
+                  <ul class="summary-points">
+                    <li v-for="p in summaryData.points" :key="p">{{ p }}</li>
+                  </ul>
+                  <template v-if="summaryData.chapters?.length">
+                    <h4 class="summary-sec">章节大纲 <small>点击时间戳直达对应片段</small></h4>
+                    <div v-for="c in summaryData.chapters" :key="c.time + c.title" class="chapter-row">
+                      <a class="ts-chip" :href="chapterHref(c.time)" target="_blank" rel="noopener">{{ c.label }}</a>
+                      <div class="chapter-text">
+                        <b>{{ c.title }}</b>
+                        <p v-if="c.detail">{{ c.detail }}</p>
+                      </div>
+                    </div>
+                  </template>
+                </template>
+              </template>
+
+              <!-- 字幕时间线 -->
+              <template v-if="activeTab === 'timeline'">
+                <div v-if="transcript.length" class="transcript-list">
+                  <div v-for="(t, i) in transcript" :key="i" class="chapter-row tl-row">
+                    <a class="ts-chip" :href="chapterHref(t.time)" target="_blank" rel="noopener">{{ fmtTime(t.time) }}</a>
+                    <p class="tl-text">{{ t.text }}</p>
+                  </div>
+                </div>
+                <p v-else class="empty-tip">{{ summaryBusy ? '字幕加载中…' : '该视频没有可用的字幕时间线' }}</p>
+              </template>
+
+              <!-- 思维导图 -->
+              <template v-if="activeTab === 'mindmap'">
+                <MindMap v-if="summaryData?.mindmap" :data="summaryData.mindmap" />
+                <p v-else class="empty-tip">{{ summaryBusy ? '思维导图生成中…' : '未能生成思维导图' }}</p>
+              </template>
+            </div>
+          </div>
 
           <p class="fmt-label">选择清晰度</p>
           <div class="fmt-list">
@@ -467,6 +729,10 @@ onBeforeUnmount(() => {
       <details class="faq-item">
         <summary>会员和免费用户的区别？</summary>
         <p>免费用户可下载标准清晰度；会员解锁全部清晰度（最高 4K）、仅音频提取与极速下载通道。</p>
+      </details>
+      <details class="faq-item">
+        <summary>AI 视频总结是什么？</summary>
+        <p>粘贴链接解析后，点击结果卡上的「AI 总结」按钮：B站、YouTube 等支持字幕的平台会基于字幕生成一句话概述、核心要点、章节大纲（可点击时间戳跳转）与思维导图；抖音等没有字幕的平台会基于标题和简介做简略总结，并在结果中如实标注总结依据。每天有免费次数，会员不限次。</p>
       </details>
       <details class="faq-item">
         <summary>下载的视频可以随便传播吗？</summary>
@@ -942,6 +1208,119 @@ export default {
 .pay-success h3 { font-size: 18px; margin-bottom: 10px; }
 .pay-success p { color: var(--text-2); font-size: 14px; line-height: 1.7; }
 
+/* ===== AI 视频总结（页内面板 + 选项卡） ===== */
+.ai-row { display: flex; align-items: center; gap: 12px; margin-top: 20px; flex-wrap: wrap; }
+.ai-btn { min-width: 150px; }
+.spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.quota-tip { color: var(--text-3); font-size: 12.5px; }
+
+.summary-panel {
+  margin-top: 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.summary-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 10px;
+  background: var(--bg-page);
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.stab {
+  border: none;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 13.5px;
+  padding: 7px 12px;
+  border-radius: 8px;
+  transition: all 0.12s;
+}
+.stab:hover { color: var(--text-1); background: #fff; }
+.stab.active { color: var(--primary); background: #fff; font-weight: 600; box-shadow: 0 1px 4px rgba(31,35,41,0.08); }
+.stab-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+.copy-link { font-size: 13px; margin-top: 0; }
+.summary-content { padding: 16px 18px 18px; max-height: 480px; overflow-y: auto; }
+
+.stream-box {
+  margin: 0;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.8;
+  color: var(--text-1);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.stream-box::after { content: '▌'; color: var(--primary); animation: blink 1s step-start infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+
+.basis-badge {
+  font-size: 11.5px;
+  padding: 3px 10px;
+  border-radius: 20px;
+  white-space: nowrap;
+  cursor: help;
+}
+.basis-badge.subtitles { background: #e1f5ee; color: #1d9e75; }
+.basis-badge.meta { background: #faeeda; color: #c47b1a; }
+
+.summary-line {
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1.7;
+  padding: 12px 14px;
+  background: var(--primary-bg);
+  border-radius: 10px;
+}
+.summary-points { margin: 14px 0 0; padding-left: 0; list-style: none; }
+.summary-points li {
+  position: relative;
+  padding: 5px 0 5px 20px;
+  color: var(--text-1);
+  font-size: 14px;
+  line-height: 1.6;
+}
+.summary-points li::before {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 13px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--primary);
+}
+.summary-sec { font-size: 15px; margin: 22px 0 10px; }
+.summary-sec small { color: var(--text-3); font-weight: 400; font-size: 12px; margin-left: 6px; }
+.chapter-row { display: flex; gap: 12px; padding: 8px 0; align-items: flex-start; }
+.ts-chip {
+  flex-shrink: 0;
+  background: var(--primary);
+  color: #fff;
+  font-size: 12.5px;
+  padding: 4px 9px;
+  border-radius: 8px;
+  text-decoration: none;
+  margin-top: 1px;
+  min-width: 42px;
+  text-align: center;
+}
+.ts-chip:hover { background: var(--primary-dark); }
+.chapter-text b { font-size: 14px; }
+.chapter-text p, .tl-text { color: var(--text-2); font-size: 13px; margin-top: 2px; line-height: 1.5; }
+.transcript-list { display: block; }
+.empty-tip { color: var(--text-3); font-size: 13.5px; text-align: center; padding: 24px 0; }
+
 /* ===== 响应式 ===== */
 @media (max-width: 900px) {
   .hero-title { font-size: 34px; }
@@ -961,5 +1340,8 @@ export default {
   .btn-lg { width: 100%; }
   .feature-grid { grid-template-columns: 1fr; }
   .done-row { flex-direction: column; align-items: stretch; text-align: center; }
+  .summary-content { max-height: 60vh; padding: 14px; }
+  .stab { font-size: 12.5px; padding: 6px 8px; }
+  .ai-row .ai-btn { flex: 1; }
 }
 </style>
