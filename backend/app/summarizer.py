@@ -14,7 +14,6 @@ v2 变更：
 - 字幕解析保留时间线（transcript），为后续字幕提取功能铺路
 - LLM 改为流式输出（chat_stream），前端 SSE 实时渲染
 - 输出格式改为 markdown 分节 + ```mindmap JSON 围栏，服务端解析成结构化数据
-- 支持 YTDLP_COOKIES_FROM_BROWSER 环境变量（如 edge/chrome），解决 YouTube 年龄门等需登录场景
 - B站降级时抓取热门评论增强素材（无需登录）
 """
 import json
@@ -31,7 +30,8 @@ from pathlib import Path
 import yt_dlp
 
 from . import douyin as douyin_mod
-from .downloader import _apply_cookies, is_douyin_url
+from .downloader import (_apply_cookies, is_douyin_url,
+                         YTDLP_ENHANCEMENTS, _get_proxy)
 
 # ---------- 配置（读取 backend/.env，不引入 python-dotenv） ----------
 
@@ -54,8 +54,6 @@ LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://api.deepseek.com").rstrip("/")
 LLM_MODEL = os.getenv("LLM_MODEL", "deepseek-chat")
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "")  # "mock" 仅本地联调用
 AI_DAILY_LIMIT = int(os.getenv("AI_DAILY_LIMIT", "3"))
-# YouTube 年龄门等需登录场景：设为 edge / chrome / firefox 等，yt-dlp 会读本机浏览器 Cookie
-YTDLP_COOKIES_FROM_BROWSER = os.getenv("YTDLP_COOKIES_FROM_BROWSER", "").strip()
 
 SUMMARY_TTL = 30 * 60        # 总结结果保留 30 分钟，与下载文件 TTL 一致
 MAX_SUBTITLE_CHARS = 12000   # 字幕文本预算（约 6~8k token）
@@ -385,6 +383,154 @@ def _truncate(text: str, limit: int = MAX_SUBTITLE_CHARS) -> str:
     return text[:limit] + "\n（字幕过长已截断，请仅总结以上内容）"
 
 
+# ---------- B站字幕通道（dm/view 弹幕池接口，无需登录、无需签名、无需 Cookie） ----------
+# 参考 liyupi/free-video-downloader 的方案：
+#   BV号 --纯本地算法--> aid；pagelist 接口（免登录）拿 cid；
+#   x/v2/dm/view?aid&oid=cid&type=1 返回字幕列表（原生 zh + ai-zh + 多语 AI 翻译），
+#   字幕 json 直链（aisubtitle.hdslb.com）无需鉴权，直接下载解析为文本+时间线。
+
+_BV_XOR = 23442827791579
+_BV_MASK = 2251799813685247
+_BV_ALPHABET = "FcwAPNKTMug3GV5Lj7EJnHpWsx4tb8haYeviqBz6rkCy12mUSDQX9RdoZf"
+
+
+def _bv2av(bvid: str) -> int | None:
+    """BV 号转 aid（纯本地算法，无需任何网络请求）。"""
+    try:
+        b = list(bvid)
+        b[3], b[9] = b[9], b[3]
+        b[4], b[7] = b[7], b[4]
+        tmp = 0
+        for ch in b[3:]:
+            tmp = tmp * 58 + _BV_ALPHABET.index(ch)
+        return (tmp ^ _BV_XOR) & _BV_MASK
+    except (ValueError, IndexError):
+        return None
+
+
+def _bili_get(url: str, referer: str = "https://www.bilibili.com/", timeout: int = 15) -> dict:
+    req = urllib.request.Request(url, headers={
+        "User-Agent": _BROWSER_UA, "Referer": referer,
+    })
+    with _direct_opener.open(req, timeout=timeout) as r:
+        return json.loads(r.read().decode("utf-8", "ignore"))
+
+
+def _bili_bvid_cid(bvid: str) -> int | None:
+    """拿 cid：pagelist 接口（无需登录，实测稳定）。"""
+    try:
+        pl = _bili_get(f"https://api.bilibili.com/x/player/pagelist?bvid={bvid}",
+                       referer=f"https://www.bilibili.com/video/{bvid}/")
+        if pl.get("code") == 0 and pl.get("data"):
+            return pl["data"][0]["cid"]
+    except Exception:
+        pass
+    return None
+
+
+def _parse_bili_subtitle_json(raw: str) -> tuple[str, list]:
+    """B站 字幕 json：{"body":[{"content":"...","from":1.2,"to":3.4},...]}"""
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return "", []
+    body = data.get("body") or []
+    merged = []
+    for item in body:
+        txt = str(item.get("content") or "").strip()
+        if not txt:
+            continue
+        t = int(float(item.get("from") or 0))
+        if merged and merged[-1][1] == txt:
+            continue
+        merged.append((t, txt))
+    transcript = [{"time": t, "text": txt} for t, txt in merged[:MAX_TRANSCRIPT_ITEMS]]
+    text = "\n".join(txt for _, txt in merged)
+    return text, transcript
+
+
+def _bili_download_subtitle(sub_url: str, referer: str) -> tuple[str, list]:
+    if sub_url.startswith("//"):
+        sub_url = "https:" + sub_url
+    elif sub_url.startswith("http://"):
+        sub_url = "https://" + sub_url[7:]
+    req = urllib.request.Request(sub_url, headers={
+        "User-Agent": _BROWSER_UA, "Referer": referer,
+    })
+    with _direct_opener.open(req, timeout=20) as r:
+        raw = r.read().decode("utf-8", "ignore")
+    return _parse_bili_subtitle_json(raw)
+
+
+def fetch_bili_subtitles(url: str, user_cookie: str = "") -> tuple[str, list] | None:
+    """B站字幕通道（dm/view，无需登录/签名/Cookie）。返回 (纯文本, 时间线) 或 None。
+    user_cookie 参数保留兼容旧调用，但本通道已不需要 Cookie。
+    字幕优先级：原生中文 > AI 中文 > 其它语言。"""
+    try:
+        m = re.search(r"(BV[\w]+)", url)
+        if not m:
+            return None
+        bvid = m.group(1)
+        aid = _bv2av(bvid)
+        cid = _bili_bvid_cid(bvid)
+        if not aid or not cid:
+            return None
+
+        referer = f"https://www.bilibili.com/video/{bvid}/"
+        dm = _bili_get(f"https://api.bilibili.com/x/v2/dm/view?aid={aid}&oid={cid}&type=1",
+                       referer=referer)
+        subtitles = ((dm.get("data") or {}).get("subtitle") or {}).get("subtitles") or []
+        if not subtitles:
+            return None
+
+        def _rank(s):
+            lan = str(s.get("lan") or "")
+            if lan in ("zh", "zh-Hans", "zh-CN"):
+                return 0
+            if lan == "ai-zh":
+                return 1
+            return 2
+        subtitles.sort(key=_rank)
+
+        for s in subtitles:
+            if not s.get("subtitle_url"):
+                continue
+            text, transcript = _bili_download_subtitle(s["subtitle_url"], referer)
+            if text.strip():
+                return _truncate(text.strip()), transcript
+        return None
+    except Exception:
+        return None
+
+
+def fetch_bili_full(url: str, user_cookie: str = "") -> tuple | None:
+    """B站纯通道兜底（yt-dlp 被 IP 风控时的降级）：pagelist + dm/view。
+    标题等元数据可能缺失（用占位），字幕可用。任一步失败返回 None。"""
+    try:
+        m = re.search(r"(BV[\w]+)", url)
+        if not m:
+            return None
+        bvid = m.group(1)
+        aid = _bv2av(bvid)
+        cid = _bili_bvid_cid(bvid)
+        if not aid or not cid:
+            return None
+        meta = {
+            "title": f"B站视频 {bvid}",
+            "webpage_url": f"https://www.bilibili.com/video/{bvid}",
+            "duration": None,
+            "platform": "BiliBili",
+        }
+        material = f"平台：BiliBili\n标题：{meta['title']}\n（元数据接口暂不可用，仅基于字幕总结）"
+        subs = fetch_bili_subtitles(url)
+        if subs and len(subs[0]) > MIN_SUBTITLE_LEN:
+            material += f"\n视频字幕内容：\n{subs[0]}"
+            return material, "subtitles", meta, subs[1]
+        return material, "meta", meta, []
+    except Exception:
+        return None
+
+
 # ---------- B站热门评论（降级增强，无需登录） ----------
 
 def _fetch_bili_comments(aid, limit: int = 8) -> list[str]:
@@ -414,15 +560,9 @@ def _fetch_bili_comments(aid, limit: int = 8) -> list[str]:
 
 # ---------- 素材组装 ----------
 
-def _apply_browser_cookies(opts: dict):
-    """可选：从本机浏览器读 Cookie（YouTube 年龄门等需登录场景）。
-    配置 YTDLP_COOKIES_FROM_BROWSER=edge|chrome|firefox 后生效。"""
-    if YTDLP_COOKIES_FROM_BROWSER:
-        opts["cookiesfrombrowser"] = (YTDLP_COOKIES_FROM_BROWSER,)
-
-
-def _build_material(url: str) -> tuple[str, str, dict, list]:
+def _build_material(url: str, bili_cookie: str = "") -> tuple[str, str, dict, list]:
     """返回 (material_text, basis, meta, transcript)。
+    bili_cookie: 用户自带的 B站 Cookie（BibiGPT 模式，可选）。
     basis: "subtitles"（基于字幕）| "meta"（基于视频信息降级）。"""
     # 抖音：复用自研通道的解析（不碰其内部），天然无字幕 → meta 降级
     if is_douyin_url(url):
@@ -434,16 +574,48 @@ def _build_material(url: str) -> tuple[str, str, dict, list]:
                 "duration": a.get("duration"), "platform": "Douyin"}
         return material, "meta", meta, []
 
-    opts = {
-        "quiet": True,
-        "no_warnings": True,
-        "skip_download": True,
-        "noplaylist": True,
-    }
-    _apply_cookies(opts)
-    _apply_browser_cookies(opts)
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        info = ydl.extract_info(url, download=False)
+    def _ydl_variants():
+        """与 downloader.analyze 一致的降级链：完整增强 → 原始配置。"""
+        def base():
+            o = {
+                "quiet": True,
+                "no_warnings": True,
+                "skip_download": True,
+                "noplaylist": True,
+                # 防止代理挂起时无限卡死（YouTube 等慢/不可达平台快速失败）
+                "socket_timeout": 30,
+                "retries": 2,
+            }
+            _apply_cookies(o)
+            return o
+        full = base()
+        full.update(YTDLP_ENHANCEMENTS)
+        proxy = _get_proxy()
+        if proxy:
+            full["proxy"] = proxy
+            bare = base()
+            bare["proxy"] = proxy
+        else:
+            bare = base()
+        return [full] if full == bare else [full, bare]
+
+    info = None
+    last_err = None
+    for opts in _ydl_variants():
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+            break
+        except Exception as e:
+            last_err = e
+            info = None
+    if info is None:
+        # B站特例：yt-dlp 被风控时，用用户 Cookie 的纯 Cookie 通道兜底
+        if "bilibili.com" in url:
+            fb = fetch_bili_full(url, bili_cookie)
+            if fb:
+                return fb
+        raise last_err
 
     webpage_url = info.get("webpage_url") or url
     meta = {
@@ -467,6 +639,13 @@ def _build_material(url: str) -> tuple[str, str, dict, list]:
     if text and len(text.strip()) > MIN_SUBTITLE_LEN:
         material = f"视频标题：{meta['title'] or ''}\n视频字幕内容：\n{_truncate(text.strip())}"
         return material, "subtitles", meta, transcript
+
+    # B站：yt-dlp 拿不到时走自研 wbi 通道（用户 Cookie / SESSDATA 可拿 AI 字幕）
+    if meta["platform"] == "BiliBili":
+        bili = fetch_bili_subtitles(url, bili_cookie)
+        if bili and len(bili[0]) > MIN_SUBTITLE_LEN:
+            material = f"视频标题：{meta['title'] or ''}\n视频字幕内容：\n{bili[0]}"
+            return material, "subtitles", meta, bili[1]
 
     # 降级：标题+UP主+时长+简介（B站再补热门评论，改善降级总结质量）
     desc = (info.get("description") or "")[:2000]
@@ -608,7 +787,7 @@ def _executor_instance():
     return _executor
 
 
-def start_summary(url: str, ip: str) -> str:
+def start_summary(url: str, ip: str, bili_cookie: str = "") -> str:
     if not HAS_LLM:
         raise RuntimeError("AI 总结功能正在开通中，敬请期待")
     _consume_quota(ip)  # 先扣额度，失败直接抛可读错误
@@ -618,6 +797,7 @@ def start_summary(url: str, ip: str) -> str:
             "task_id": task_id,
             "status": "fetching_subtitles",
             "url": url,
+            "bili_cookie": bili_cookie or "",   # 用户自带 B站 Cookie（BibiGPT 模式，服务端不落盘）
             "basis": None,
             "title": None,
             "webpage_url": None,
@@ -637,7 +817,9 @@ def start_summary(url: str, ip: str) -> str:
 def _prepare_material(task_id: str, url: str):
     """阶段 1（后台线程）：提取字幕/组装素材，完成后自动提交阶段 2。"""
     try:
-        material, basis, meta, transcript = _build_material(url)
+        with _lock:
+            bili_cookie = _summaries[task_id].get("bili_cookie") or ""
+        material, basis, meta, transcript = _build_material(url, bili_cookie)
         with _lock:
             _summaries[task_id].update(
                 status="summarizing", basis=basis, material=material,

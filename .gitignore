@@ -9,9 +9,20 @@ __pycache__/
 node_modules/
 frontend/dist/
 
-# 运行时产物
+# 构建产物（npm run build 重新生成）
+backend/static/
+
+# 运行时产物与本地数据
 backend/downloads/
+backend/cookies/
+backend/proxy.txt
+.workbuddy/
 *.log
 
 # 本地测试
 .playwright-cli/
+.tools/
+.tools/
+*.genie
+_tid.txt
+*.yaml
