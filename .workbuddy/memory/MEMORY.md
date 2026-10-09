@@ -13,8 +13,7 @@
 
 ## 线上与部署
 - 线上链接：https://yijixia-video-downloader.app.workbuddy.host/ （应用名「极易下视频下载」）
-- **用户硬性要求：每次改动都要同步到线上**。deploy 参数（workbuddy_sites_deploy）：
-  `directory=D:\code\video-downloader\backend, language=python, installCmd="pip install -r requirements.txt", startCmd="python run.py", domainPrefix=yijixia-video-downloader, userAskedToPublish=true`
+- **部署约定（用户 2026-10-09 更新）：默认只在本地部署验证；是否同步线上每次先询问用户，确认后才调 workbuddy_sites_deploy**（避免频繁消耗 token）。deploy 参数：`directory=D:\code\video-downloader\backend, language=python, installCmd="pip install -r requirements.txt", startCmd="python run.py", domainPrefix=yijixia-video-downloader, userAskedToPublish=true`
 - 线上平台可用性（实测）：抖音✅（自研通道云端可用）/ B站❌（云 IP 风控）/ YouTube❌（出口不通）/ 其它 yt-dlp 平台多数受云 IP 影响问
 
 ## 关键模块地图
@@ -25,10 +24,12 @@
 
 ## 踩坑经验（勿重蹈）
 - **Python urllib 读 Windows 注册表系统代理**（本机残留 127.0.0.1:4185）：`env -u` 清环境变量不够；curl 测通≠Python 测通，网络验证必须同技术栈（已修：douyin.py 强制直连 + 重试 + 三层异常兜底）
+- **DASH 平台单格式是无声视频**（B站/YouTube）：下载时必须 `format_id+bestaudio` 让 yt-dlp 合并音轨（已修，ffprobe 验证双流）；无 ffmpeg 环境退回渐进式 best
 - WorkBuddy 发布沙箱：仅一个 HTTP 端口、无数据库；run.py 必须读 `PORT` 环境变量
 - 无 ffmpeg 环境自动降级：只给渐进式格式、禁音频提取
 - 抖音 URL 形态远比想象多：ID 提取按**参数**匹配而非路径匹配；抖音视频 ID 会失效，测试要用实时链接
 - 抖音图集/图文暂不支持（明确报错）；超过 100MB 的原画文件下载较慢
+- 解析/下载均为异步任务模式（提交+轮询），YouTube 等慢平台解析超 1 分钟也不会被网关 504 掐断
 
 ## 测试资源
 - B站：BV1GJ411x7h7；YouTube：dQw4w9WgXcQ（直连时好时坏，需代理）；抖音：7692329355342679331、精选页 modal_id=7685717085573434664 / 7691552296500595978

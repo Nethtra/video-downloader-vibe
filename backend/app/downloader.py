@@ -11,18 +11,68 @@ from . import douyin as douyin_mod
 
 HAS_FFMPEG = shutil.which("ffmpeg") is not None
 
+# ---------- yt-dlp 全局增强 ----------
+# 新版 yt-dlp 解析 YouTube 需要 JS 运行时（解 n-challenge 签名），
+# 并建议启用官方远程挑战求解脚本，否则格式缺失/签名失败。
+os.environ.pop("NODE_OPTIONS", None)  # 剔除宿主注入的 node 启动参数（会限制 fs 权限导致求解脚本报错）
+
+
+def _find_node() -> str | None:
+    """定位 node：PATH → Windows 常见位置 → WorkBuddy 托管目录。"""
+    found = shutil.which("node")
+    if found:
+        return found
+    import glob
+    candidates = [
+        r"C:\Program Files\nodejs\node.exe",
+        os.path.expanduser(r"~\.workbuddy\binaries\node\versions\*\node.exe"),
+    ]
+    for pattern in candidates:
+        for path in sorted(glob.glob(pattern), reverse=True):
+            if os.path.isfile(path):
+                return path
+    return None
+
+
+_node_path = _find_node()
+YTDLP_ENHANCEMENTS = {}
+if _node_path:
+    YTDLP_ENHANCEMENTS = {
+        "js_runtimes": {"node": {"path": _node_path}},
+        "remote_components": ["ejs:github"],
+    }
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 DOWNLOAD_DIR = BASE_DIR / "downloads"
 DOWNLOAD_DIR.mkdir(exist_ok=True)
 COOKIES_FILE = BASE_DIR / "cookies" / "cookies.txt"  # Netscape 格式，可选
 
+# 可选代理：backend/proxy.txt 每行一个代理地址（如 http://127.0.0.1:7890），
+# 用于服务器访问 YouTube 等外网平台；文件不存在则用系统默认行为。
+PROXY_FILE = BASE_DIR / "proxy.txt"
+
+# 是否启用 cookies.txt：实测 yt-dlp 自动回写的过期访客 Cookie 会导致
+# YouTube 被降级到 360p（无 Cookie 反而能拿全 4K），故默认关闭。
+# 若某平台确需 Cookie，把 backend/cookies/enabled 空文件建出来即可开启。
+COOKIES_ENABLED_MARKER = BASE_DIR / "cookies" / "enabled"
+
+
+def _get_proxy() -> str | None:
+    try:
+        if PROXY_FILE.exists():
+            value = PROXY_FILE.read_text(encoding="utf-8").strip()
+            return value or None
+    except OSError:
+        pass
+    return None
+
 FILE_TTL_SECONDS = 30 * 60  # 文件保留 30 分钟后清理
 
 
 def _apply_cookies(opts: dict):
-    """若存在 cookies/cookies.txt 则启用（其它平台可选的 Cookie 配置）。
-    抖音已走 douyin.py 自研无 Cookie 通道，不再依赖此文件。"""
-    if COOKIES_FILE.exists():
+    """可选的 Cookie 支持（默认关闭，见 COOKIES_ENABLED_MARKER 注释）。
+    抖音走 douyin.py 自研免 Cookie 通道，不依赖此文件。"""
+    if COOKIES_ENABLED_MARKER.exists() and COOKIES_FILE.exists():
         opts["cookiefile"] = str(COOKIES_FILE)
 
 _tasks = {}
@@ -48,6 +98,39 @@ def is_douyin_url(url: str) -> bool:
     return "douyin.com" in url or "douyin" in url.lower()
 
 
+# ---------- 异步解析任务（慢平台如 YouTube 可能超过网关超时，改为提交+轮询） ----------
+_analyze_tasks = {}
+ANALYZE_TTL = 10 * 60
+
+
+def start_analyze(url: str) -> str:
+    analyze_id = uuid.uuid4().hex[:12]
+    with _lock:
+        _analyze_tasks[analyze_id] = {"status": "running", "result": None, "error": None,
+                                      "created_at": time.time()}
+    _executor_instance().submit(_run_analyze, analyze_id, url)
+    return analyze_id
+
+
+def _run_analyze(analyze_id: str, url: str):
+    try:
+        result = analyze(url)
+        with _lock:
+            t = _analyze_tasks.get(analyze_id)
+            if t:
+                t.update({"status": "done", "result": result})
+    except Exception as e:
+        with _lock:
+            t = _analyze_tasks.get(analyze_id)
+            if t:
+                t.update({"status": "error", "error": str(e)[:500]})
+
+
+def get_analyze_task(analyze_id: str) -> dict | None:
+    with _lock:
+        return _analyze_tasks.get(analyze_id)
+
+
 def analyze(url: str) -> dict:
     """解析视频信息，返回标题、封面、可选清晰度列表等。"""
     if is_douyin_url(url):
@@ -59,8 +142,20 @@ def analyze(url: str) -> dict:
         "noplaylist": True,
     }
     _apply_cookies(opts)
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        info = ydl.extract_info(url, download=False)
+    opts.update(YTDLP_ENHANCEMENTS)
+    proxy = _get_proxy()
+    if proxy:
+        opts["proxy"] = proxy
+    info = None
+    for attempt in range(3):
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+        # YouTube 的 SABR 限制按请求随机下发：偶尔只给 360p 渐进式。
+        # 现代视频几乎都有 ≥720p，检测到"疑似被降级"就重试（新请求会换访客身份）。
+        heights = [f.get("height") or 0 for f in (info.get("formats") or [])
+                   if f.get("vcodec") != "none"]
+        if max(heights or [0]) >= 480 or attempt == 2:
+            break
 
     # 整理可选格式：按分辨率分组，每个分辨率取最优 mp4 优先项
     candidates = {}
@@ -148,11 +243,19 @@ def _run_download(task_id: str, url: str, format_id: str, mode: str):
                     task["status"] = "processing"
                     task["progress"] = 99
 
-    fmt = format_id
     if mode == "audio":
         if not HAS_FFMPEG:
             raise RuntimeError("服务端未安装 ffmpeg，暂不支持音频提取")
         fmt = "bestaudio/best"
+    elif format_id and format_id != "best":
+        # DASH 平台（B站/YouTube 等）的单个清晰度是"无音轨的纯视频流"，
+        # 必须显式拼接最佳音轨让 yt-dlp 用 ffmpeg 合并，否则下载出来的是无声视频。
+        if HAS_FFMPEG:
+            fmt = f"{format_id}+bestaudio/{format_id}/best"
+        else:
+            fmt = "best"  # 无 ffmpeg 无法合并，退回"音视频合一"的渐进式格式
+    else:
+        fmt = format_id or "best"
     opts = {
         "quiet": True,
         "no_warnings": True,
@@ -172,6 +275,10 @@ def _run_download(task_id: str, url: str, format_id: str, mode: str):
     if mode == "audio":
         opts["postprocessors"] = [{"key": "FFmpegExtractAudio", "preferredcodec": "m4a"}]
     _apply_cookies(opts)
+    opts.update(YTDLP_ENHANCEMENTS)
+    proxy = _get_proxy()
+    if proxy:
+        opts["proxy"] = proxy
 
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
@@ -307,3 +414,7 @@ def cleanup_expired():
                    if now - t["created_at"] > FILE_TTL_SECONDS and t["status"] in ("done", "error")]
         for tid in expired:
             _tasks.pop(tid, None)
+        expired_a = [aid for aid, t in _analyze_tasks.items()
+                     if now - t["created_at"] > ANALYZE_TTL and t["status"] in ("done", "error")]
+        for aid in expired_a:
+            _analyze_tasks.pop(aid, None)
