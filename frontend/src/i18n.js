@@ -8,6 +8,7 @@ import { ref } from 'vue'
 
 const zhCN = {
   'nav.features': '功能', 'nav.pricing': '定价', 'nav.faq': '常见问题', 'nav.start': '免费开始', 'nav.lang': '语言',
+  'nav.theme': '主题', 'theme.auto': '跟随系统', 'theme.light': '浅色', 'theme.dark': '深色',
   'hero.t1': '全网视频下载，', 'hero.t2': '一键保存',
   'hero.sub': '支持 B站 / 抖音 / YouTube / 小红书 等 1000+ 平台，无需登录、不限设备，手机电脑都能用',
   'hero.ph': '粘贴视频链接，例如 https://www.bilibili.com/video/...',
@@ -83,6 +84,7 @@ const zhCN = {
 
 const en = {
   'nav.features': 'Features', 'nav.pricing': 'Pricing', 'nav.faq': 'FAQ', 'nav.start': 'Start Free', 'nav.lang': 'Language',
+  'nav.theme': 'Theme', 'theme.auto': 'System', 'theme.light': 'Light', 'theme.dark': 'Dark',
   'hero.t1': 'Download videos from ', 'hero.t2': 'any site, in one click',
   'hero.sub': 'Bilibili / Douyin / YouTube / Xiaohongshu and 1000+ more platforms. No login, no install — works on desktop and mobile.',
   'hero.ph': 'Paste a video link, e.g. https://www.bilibili.com/video/...',
@@ -158,6 +160,7 @@ const en = {
 
 const ja = {
   'nav.features': '機能', 'nav.pricing': '料金', 'nav.faq': 'よくある質問', 'nav.start': '無料で開始', 'nav.lang': '言語',
+  'nav.theme': 'テーマ', 'theme.auto': 'システムに従う', 'theme.light': 'ライト', 'theme.dark': 'ダーク',
   'hero.t1': '動画ダウンロードを', 'hero.t2': 'ワンクリックで',
   'hero.sub': 'ビリビリ / 抖音 / YouTube / 小紅書など 1000+ プラットフォーム対応。ログイン不要、アプリ不要、PC でもスマホでも',
   'hero.ph': '動画の URL を貼り付け（例: https://www.bilibili.com/video/...）',
@@ -233,6 +236,7 @@ const ja = {
 
 const ko = {
   'nav.features': '기능', 'nav.pricing': '요금', 'nav.faq': 'FAQ', 'nav.start': '무료 시작', 'nav.lang': '언어',
+  'nav.theme': '테마', 'theme.auto': '시스템 따르기', 'theme.light': '라이트', 'theme.dark': '다크',
   'hero.t1': '모든 사이트의 영상을', 'hero.t2': '한 번에 저장',
   'hero.sub': '빌리빌리 / 둥인 / YouTube / 샤오홍슈 등 1000+ 플랫폼 지원. 로그인 불필요, 앱 불필요, PC와 모바일 모두 사용 가능',
   'hero.ph': '영상 링크를 붙여넣으세요 (예: https://www.bilibili.com/video/...)',
@@ -308,6 +312,7 @@ const ko = {
 
 const es = {
   'nav.features': 'Funciones', 'nav.pricing': 'Precios', 'nav.faq': 'Preguntas', 'nav.start': 'Empieza gratis', 'nav.lang': 'Idioma',
+  'nav.theme': 'Tema', 'theme.auto': 'Sistema', 'theme.light': 'Claro', 'theme.dark': 'Oscuro',
   'hero.t1': 'Descarga vídeos de', 'hero.t2': 'cualquier sitio, en un clic',
   'hero.sub': 'Bilibili / Douyin / YouTube / Xiaohongshu y más de 1000 plataformas. Sin registro, sin apps: funciona en PC y móvil.',
   'hero.ph': 'Pega un enlace de vídeo, p. ej. https://www.bilibili.com/video/...',
@@ -383,6 +388,7 @@ const es = {
 
 const fr = {
   'nav.features': 'Fonctions', 'nav.pricing': 'Tarifs', 'nav.faq': 'FAQ', 'nav.start': 'Commencer', 'nav.lang': 'Langue',
+  'nav.theme': 'Thème', 'theme.auto': 'Système', 'theme.light': 'Clair', 'theme.dark': 'Sombre',
   'hero.t1': 'Téléchargez les vidéos de ', 'hero.t2': 'n’importe quel site, en un clic',
   'hero.sub': 'Bilibili / Douyin / YouTube / Xiaohongshu et plus de 1000 plateformes. Sans compte, sans installation — sur PC comme sur mobile.',
   'hero.ph': 'Collez un lien de vidéo, ex. https://www.bilibili.com/video/...',
