@@ -26,3 +26,6 @@ backend/proxy.txt
 *.genie
 _tid.txt
 *.yaml
+
+# 本地测试产物
+.test-downloads/

@@ -106,7 +106,7 @@ def _get_proxy() -> str | None:
             server, _ = winreg.QueryValueEx(k, "ProxyServer")
             if server and "=" not in server:  # 简单格式 127.0.0.1:5933
                 return f"http://{server}"
-    except OSError:
+    except Exception:  # 非 Windows 平台无 winreg（ImportError）等，一律跳过注册表探测
         pass
     return None
 

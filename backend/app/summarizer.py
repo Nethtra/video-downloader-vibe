@@ -56,7 +56,7 @@ LLM_PROVIDER = os.getenv("LLM_PROVIDER", "")  # "mock" 仅本地联调用
 AI_DAILY_LIMIT = int(os.getenv("AI_DAILY_LIMIT", "3"))
 
 SUMMARY_TTL = 30 * 60        # 总结结果保留 30 分钟，与下载文件 TTL 一致
-MAX_SUBTITLE_CHARS = 12000   # 字幕文本预算（约 6~8k token）
+MAX_SUBTITLE_CHARS = 16000   # 字幕文本预算（约 10k token，保证长视频总结素材充足）
 MAX_TRANSCRIPT_ITEMS = 400   # 字幕时间线最多保留条数
 LLM_TIMEOUT = 90
 MIN_SUBTITLE_LEN = 50        # 字幕太短视为无效，走降级
@@ -224,30 +224,36 @@ provider: LLMProvider = MockLLMProvider() if LLM_PROVIDER == "mock" else OpenAIC
 
 # ---------- Prompt ----------
 
-SYSTEM_PROMPT = """你是视频内容总结助手。根据给定的素材（视频字幕或视频基本信息）输出中文总结。
+SYSTEM_PROMPT = """你是视频内容总结助手。根据给定的素材（视频字幕或视频基本信息）输出一份详实、具体的中文总结。
 严格按以下 markdown 格式输出，不要输出任何其它内容：
 
 ## 概述
-（一句话概述，不超过 80 字）
+（2~3 句话概括视频主题、讲了什么以及核心结论，总长不超过 150 字）
 
 ## 核心要点
-- 要点一（每条不超过 40 字，共 3~6 条）
+- 要点一（共 5~8 条，每条 40~120 字）
 - 要点二
 
 ## 章节大纲
-- **[分:秒]** 章节标题：一句话说明（按素材时间信息划分，3~8 个）
-- **[分:秒]** 章节标题：一句话说明
+- **[分:秒]** 章节标题：用 2~3 句话说明这一章讲了什么、有哪些关键细节与结论（4~10 个）
+- **[分:秒]** 章节标题：说明
 
 ## 思维导图
 ```mindmap
 {"title":"主题","children":[{"title":"分支","children":[{"title":"子节点"}]}]}
 ```
 
+质量要求：
+1. 宁可具体、不要笼统：保留素材中的关键数字、专有名词、方法步骤与因果关系，禁止"讲了很多内容""非常重要"这类空话；
+2. 核心要点之间不要重复，每条覆盖视频的不同侧面。
+
 格式约束：
-1. 素材没有时间信息时，整个「## 章节大纲」小节省略不写；
-2. 思维导图必须是合法 JSON，最多 3 层、每层最多 5 个节点；
-3. 素材只是视频基本信息（无字幕）时：概述与要点必须基于素材如实概括，不得编造视频内容；
-4. 字幕被截断时只总结已有部分，不要猜测截断之后的内容。"""
+1. 素材没有时间信息时，整个「## 章节大纲」小节省略不写；章节时间戳必须是纯数字格式 [分:秒]，不要写「约」「大约」等前缀，也不要写成时间区间；
+2. 素材中的字幕每行行首带有 [分:秒] 时间戳：章节大纲的时间必须取自素材中该章节首句的真实时间戳，禁止自行估算；
+3. 除章节行的时间戳加粗外，全文不要使用 markdown 加粗/斜体标记（**、*、__），直接输出纯文本；
+4. 思维导图必须是合法 JSON，最多 3 层、每层最多 5 个节点；
+5. 素材只是视频基本信息（无字幕）时：概述与要点必须基于素材如实概括，不得编造视频内容；
+6. 字幕被截断时只总结已有部分，不要猜测截断之后的内容。"""
 
 
 # ---------- 字幕提取（保留时间线） ----------
@@ -404,6 +410,17 @@ def _truncate(text: str, limit: int = MAX_SUBTITLE_CHARS) -> str:
     return text[:limit] + "\n（字幕过长已截断，请仅总结以上内容）"
 
 
+def _fmt_ts(sec: int) -> str:
+    """秒 → 分:秒（章节时间戳与素材标注统一格式）。"""
+    m, s = divmod(max(0, int(sec)), 60)
+    return f"{m}:{s:02d}"
+
+
+def _timed_text(transcript: list) -> str:
+    """把时间线渲染为带 [分:秒] 前缀的素材文本，让 LLM 的章节时间有真实依据。"""
+    return "\n".join(f"[{_fmt_ts(item['time'])}] {item['text']}" for item in transcript)
+
+
 # ---------- B站字幕通道（dm/view 弹幕池接口，无需登录、无需签名、无需 Cookie） ----------
 # 参考 liyupi/free-video-downloader 的方案：
 #   BV号 --纯本地算法--> aid；pagelist 接口（免登录）拿 cid；
@@ -483,9 +500,8 @@ def _bili_download_subtitle(sub_url: str, referer: str) -> tuple[str, list]:
     return _parse_bili_subtitle_json(raw)
 
 
-def fetch_bili_subtitles(url: str, user_cookie: str = "") -> tuple[str, list] | None:
+def fetch_bili_subtitles(url: str) -> tuple[str, list] | None:
     """B站字幕通道（dm/view，无需登录/签名/Cookie）。返回 (纯文本, 时间线) 或 None。
-    user_cookie 参数保留兼容旧调用，但本通道已不需要 Cookie。
     字幕优先级：原生中文 > AI 中文 > 其它语言。"""
     try:
         m = re.search(r"(BV[\w]+)", url)
@@ -524,7 +540,7 @@ def fetch_bili_subtitles(url: str, user_cookie: str = "") -> tuple[str, list] | 
         return None
 
 
-def fetch_bili_full(url: str, user_cookie: str = "") -> tuple | None:
+def fetch_bili_full(url: str) -> tuple | None:
     """B站纯通道兜底（yt-dlp 被 IP 风控时的降级）：pagelist + dm/view。
     标题等元数据可能缺失（用占位），字幕可用。任一步失败返回 None。"""
     try:
@@ -545,7 +561,8 @@ def fetch_bili_full(url: str, user_cookie: str = "") -> tuple | None:
         material = f"平台：BiliBili\n标题：{meta['title']}\n（元数据接口暂不可用，仅基于字幕总结）"
         subs = fetch_bili_subtitles(url)
         if subs and len(subs[0]) > MIN_SUBTITLE_LEN:
-            material += f"\n视频字幕内容：\n{subs[0]}"
+            material += (f"\n视频字幕内容（每行行首的[分:秒]是该句开始时间）：\n"
+                         f"{_truncate(_timed_text(subs[1]))}")
             return material, "subtitles", meta, subs[1]
         return material, "meta", meta, []
     except Exception:
@@ -581,9 +598,8 @@ def _fetch_bili_comments(aid, limit: int = 8) -> list[str]:
 
 # ---------- 素材组装 ----------
 
-def _build_material(url: str, bili_cookie: str = "") -> tuple[str, str, dict, list]:
+def _build_material(url: str) -> tuple[str, str, dict, list]:
     """返回 (material_text, basis, meta, transcript)。
-    bili_cookie: 用户自带的 B站 Cookie（BibiGPT 模式，可选）。
     basis: "subtitles"（基于字幕）| "meta"（基于视频信息降级）。"""
     # 抖音：复用自研通道的解析（不碰其内部），天然无字幕 → meta 降级
     if is_douyin_url(url):
@@ -631,9 +647,9 @@ def _build_material(url: str, bili_cookie: str = "") -> tuple[str, str, dict, li
             last_err = e
             info = None
     if info is None:
-        # B站特例：yt-dlp 被风控时，用用户 Cookie 的纯 Cookie 通道兜底
+        # B站特例：yt-dlp 被风控时，用 dm/view 纯通道兜底（免登录）
         if "bilibili.com" in url:
-            fb = fetch_bili_full(url, bili_cookie)
+            fb = fetch_bili_full(url)
             if fb:
                 return fb
         raise last_err
@@ -658,14 +674,19 @@ def _build_material(url: str, bili_cookie: str = "") -> tuple[str, str, dict, li
         text, transcript = "", []
 
     if text and len(text.strip()) > MIN_SUBTITLE_LEN:
-        material = f"视频标题：{meta['title'] or ''}\n视频字幕内容：\n{_truncate(text.strip())}"
+        # 素材带 [分:秒] 时间戳：章节大纲的时间才能取真实值（否则 LLM 只能按比例瞎猜）
+        material = (f"视频标题：{meta['title'] or ''}\n"
+                    f"视频字幕内容（每行行首的[分:秒]是该句开始时间）：\n"
+                    f"{_truncate(_timed_text(transcript))}")
         return material, "subtitles", meta, transcript
 
-    # B站：yt-dlp 拿不到时走自研 wbi 通道（用户 Cookie / SESSDATA 可拿 AI 字幕）
+    # B站：yt-dlp 拿不到时走自研 dm/view 通道（免登录免 Cookie）
     if meta["platform"] == "BiliBili":
-        bili = fetch_bili_subtitles(url, bili_cookie)
+        bili = fetch_bili_subtitles(url)
         if bili and len(bili[0]) > MIN_SUBTITLE_LEN:
-            material = f"视频标题：{meta['title'] or ''}\n视频字幕内容：\n{bili[0]}"
+            material = (f"视频标题：{meta['title'] or ''}\n"
+                        f"视频字幕内容（每行行首的[分:秒]是该句开始时间）：\n"
+                        f"{_truncate(_timed_text(bili[1]))}")
             return material, "subtitles", meta, bili[1]
 
     # 降级：标题+UP主+时长+简介（B站再补热门评论，改善降级总结质量）
@@ -683,7 +704,12 @@ def _build_material(url: str, bili_cookie: str = "") -> tuple[str, str, dict, li
 # ---------- LLM 输出解析（markdown 分节 + mindmap 围栏） ----------
 
 _MINDMAP_FENCE = re.compile(r"```mindmap\s*(\{.*?\})\s*```", re.S)
-_CHAPTER_LINE = re.compile(r"^-\s*\*\*\[(\d{1,2}:\d{1,2}(?::\d{1,2})?)\]\*\*\s*(.+)$")
+# 章节行：- [分:秒] 标题：说明。容忍 LLM 的常见变体：
+#   ** 加粗可有可无、时间戳前缀「约/大约/~」、时间区间 [00:00-03:10]（取起点）、全角冒号 02：00
+_CHAPTER_LINE = re.compile(
+    r"^-\s*\*{0,2}\[(?:大约|约)?\s*(\d{1,2}[：:]\d{1,2}(?:[：:]\d{1,2})?)"
+    r"(?:[-–~—至]\s*\d{1,2}[：:]\d{1,2}(?:[：:]\d{1,2})?)?\]\*{0,2}\s*(.+)$"
+)
 
 
 def _norm_mindmap_node(node, depth):
@@ -715,6 +741,7 @@ def _parse_mindmap(raw: str) -> dict | None:
 
 
 def _ts_str_to_sec(ts: str) -> int:
+    ts = ts.replace("：", ":")  # 兼容 LLM 输出的全角冒号
     parts = [int(x) for x in ts.split(":")]
     while len(parts) < 3:
         parts.insert(0, 0)
@@ -733,26 +760,31 @@ def _parse_llm_output(raw: str) -> dict:
         return m.group(1).strip() if m else ""
 
     ov_lines = [l.strip() for l in section("概述").splitlines() if l.strip()]
-    result["overview"] = ov_lines[0][:150] if ov_lines else ""
+    result["overview"] = "".join(ov_lines)[:200]  # 概述允许多句
 
     for line in section("核心要点").splitlines():
         line = line.strip()
         if line.startswith(("-", "•", "*")):
             p = line.lstrip("-•* ").strip()
             if p:
-                result["points"].append(p[:80])
-    result["points"] = result["points"][:6]
+                # LLM 常把要点词加粗（**xx**：），剥掉加粗标记避免前端裸露星号
+                result["points"].append(p.replace("**", "").replace("__", "")[:220])
+    result["points"] = result["points"][:8]
 
     for line in section("章节大纲").splitlines():
         m = _CHAPTER_LINE.match(line.strip())
         if m:
-            ts, rest = m.group(1), m.group(2)
+            ts = m.group(1).replace("：", ":")  # label 统一半角，展示与跳转参数一致
+            rest = m.group(2)
             title, _, detail = rest.partition("：")
+            if not detail:  # 兼容半角冒号分隔
+                title, _, detail = rest.partition(":")
+            clean = lambda x: x.strip().replace("**", "").replace("__", "")
             result["chapters"].append({
                 "time": _ts_str_to_sec(ts),
                 "label": ts,
-                "title": title.strip()[:60] or ts,
-                "detail": detail.strip()[:120],
+                "title": clean(title)[:60] or ts,
+                "detail": clean(detail)[:300],
             })
     result["chapters"] = result["chapters"][:12]
 
@@ -808,7 +840,7 @@ def _executor_instance():
     return _executor
 
 
-def start_summary(url: str, ip: str, bili_cookie: str = "") -> str:
+def start_summary(url: str, ip: str) -> str:
     if not HAS_LLM:
         raise RuntimeError("AI 总结功能正在开通中，敬请期待")
     _consume_quota(ip)  # 先扣额度，失败直接抛可读错误
@@ -818,7 +850,6 @@ def start_summary(url: str, ip: str, bili_cookie: str = "") -> str:
             "task_id": task_id,
             "status": "fetching_subtitles",
             "url": url,
-            "bili_cookie": bili_cookie or "",   # 用户自带 B站 Cookie（BibiGPT 模式，服务端不落盘）
             "basis": None,
             "title": None,
             "webpage_url": None,
@@ -838,9 +869,7 @@ def start_summary(url: str, ip: str, bili_cookie: str = "") -> str:
 def _prepare_material(task_id: str, url: str):
     """阶段 1（后台线程）：提取字幕/组装素材，完成后自动提交阶段 2。"""
     try:
-        with _lock:
-            bili_cookie = _summaries[task_id].get("bili_cookie") or ""
-        material, basis, meta, transcript = _build_material(url, bili_cookie)
+        material, basis, meta, transcript = _build_material(url)
         with _lock:
             _summaries[task_id].update(
                 status="summarizing", basis=basis, material=material,
