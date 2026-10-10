@@ -2,6 +2,9 @@
 import { ref, computed, watch, nextTick, onBeforeUnmount } from 'vue'
 import MindMap from './components/MindMap.vue'
 import { t, tl, locale, setLocale, LANGS } from './i18n'
+import { theme, setTheme } from './theme'
+
+const THEMES = ['auto', 'light', 'dark']
 
 /* ---------------- 分析与下载 ---------------- */
 const url = ref('')
@@ -510,6 +513,9 @@ onBeforeUnmount(() => {
       <select class="lang-select" v-model="locale" :aria-label="t('nav.lang')" @change="setLocale(locale)">
         <option v-for="l in LANGS" :key="l.value" :value="l.value">{{ l.label }}</option>
       </select>
+      <select class="lang-select" :value="theme" :aria-label="t('nav.theme')" @change="setTheme($event.target.value)">
+        <option v-for="th in THEMES" :key="th" :value="th">{{ t('theme.' + th) }}</option>
+      </select>
       <a class="btn btn-sm" href="#hero">{{ t('nav.start') }}</a>
     </div>
   </header>
@@ -919,12 +925,12 @@ export default {
 }
 .btn:hover { background: var(--primary-dark); }
 .btn:active { transform: scale(0.98); }
-.btn:disabled { background: #8ec8c2; cursor: not-allowed; }
+.btn:disabled { background: var(--btn-disabled); cursor: not-allowed; }
 .btn-lg { padding: 13px 30px; font-size: 16px; }
 .btn-sm { padding: 7px 16px; font-size: 14px; }
 .btn-block { width: 100%; }
 .btn-outline {
-  background: #fff;
+  background: var(--bg-elevated);
   color: var(--primary);
   border: 1px solid var(--primary);
 }
@@ -943,7 +949,7 @@ export default {
   position: sticky;
   top: 0;
   z-index: 50;
-  background: rgba(255, 255, 255, 0.92);
+  background: var(--nav-bg);
   backdrop-filter: blur(8px);
   border-bottom: 1px solid var(--border);
 }
@@ -968,7 +974,7 @@ export default {
   height: 30px;
   border: 1px solid var(--border);
   border-radius: 7px;
-  background: #fff;
+  background: var(--bg-elevated);
   color: var(--text-2);
   font-size: 12.5px;
   padding: 0 6px;
@@ -996,14 +1002,14 @@ export default {
   padding: 0 16px;
   font-size: 14px;
   outline: none;
-  background: #fff;
+  background: var(--bg-elevated);
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 .url-input:focus {
   border-color: var(--primary);
   box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.14);
 }
-.error-tip { color: #c2453a; margin-top: 12px; font-size: 13.5px; }
+.error-tip { color: var(--danger); margin-top: 12px; font-size: 13.5px; }
 .hero-hint { color: var(--text-3); font-size: 12.5px; margin-top: 14px; }
 
 /* ===== 解析结果（双栏工作台） ===== */
@@ -1074,7 +1080,7 @@ export default {
 .fmt-list { display: flex; flex-wrap: wrap; gap: 7px; }
 .fmt-chip {
   border: 1.5px solid var(--border);
-  background: #fff;
+  background: var(--bg-elevated);
   color: var(--text-1);
   border-radius: 8px;
   padding: 7px 12px;
@@ -1116,8 +1122,8 @@ export default {
 .progress-meta { color: var(--text-3); font-size: 12px; margin-top: 7px; }
 .done-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .done-badge {
-  color: #0f766e;
-  background: #e2f4f1;
+  color: var(--badge-teal-text);
+  background: var(--badge-teal-bg);
   padding: 7px 12px;
   border-radius: 8px;
   font-size: 13px;
@@ -1144,14 +1150,14 @@ export default {
   padding: 40px 0;
   border: 1px dashed var(--border);
   border-radius: 10px;
-  background: #fff;
+  background: var(--bg-elevated);
 }
 
 /* ===== 三步流程 ===== */
 .steps { padding: 34px 0; background: var(--bg-card); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
 .steps-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
 .step {
-  background: #fff;
+  background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 18px 20px;
@@ -1185,7 +1191,7 @@ export default {
   margin-top: 26px;
 }
 .feature-card {
-  background: #fff;
+  background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 18px 20px;
@@ -1220,7 +1226,7 @@ export default {
 }
 .plan-card {
   position: relative;
-  background: #fff;
+  background: var(--bg-elevated);
   border: 1.5px solid var(--border);
   border-radius: 12px;
   padding: 22px 20px;
@@ -1261,7 +1267,7 @@ export default {
 .faq-inner { max-width: 720px; }
 .faq .sec-title { margin-bottom: 22px; }
 .faq-item {
-  background: #fff;
+  background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 13px 18px;
@@ -1301,7 +1307,7 @@ export default {
   padding: 20px;
 }
 .modal {
-  background: #fff;
+  background: var(--bg-elevated);
   border-radius: 16px;
   padding: 32px 28px;
   width: 360px;
@@ -1331,8 +1337,8 @@ export default {
   height: 64px;
   margin: 0 auto 18px;
   border-radius: 50%;
-  background: #e1f5ee;
-  color: #0f6e56;
+  background: var(--ok-bg);
+  color: var(--ok-text);
   font-size: 32px;
   display: flex;
   align-items: center;
@@ -1357,7 +1363,7 @@ export default {
 
 .summary-panel {
   margin-top: 12px;
-  background: #fff;
+  background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: 10px;
   overflow: hidden;
@@ -1413,8 +1419,8 @@ export default {
   white-space: nowrap;
   cursor: help;
 }
-.basis-badge.subtitles { background: #e2f4f1; color: #0f766e; }
-.basis-badge.meta { background: #f5ecdd; color: #a3762a; }
+.basis-badge.subtitles { background: var(--badge-teal-bg); color: var(--badge-teal-text); }
+.basis-badge.meta { background: var(--badge-amber-bg); color: var(--badge-amber-text); }
 
 .summary-line {
   font-size: 14px;

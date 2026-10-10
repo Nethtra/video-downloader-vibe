@@ -22,10 +22,8 @@ backend/proxy.txt
 # 本地测试
 .playwright-cli/
 .tools/
-.tools/
 *.genie
 _tid.txt
-*.yaml
 
 # 本地测试产物
 .test-downloads/

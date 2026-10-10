@@ -241,7 +241,7 @@ function downloadPng() {
 .mm-toolbar { display: flex; justify-content: flex-end; gap: 6px; margin-bottom: 6px; }
 .mm-tool-btn {
   border: 1px solid var(--border, #dbe8e5);
-  background: #fff;
+  background: var(--bg-elevated, #fff);
   color: var(--text-2, #4e5969);
   font-size: 12px;
   padding: 4px 10px;
@@ -254,12 +254,12 @@ function downloadPng() {
 .mindmap-svg { display: block; }
 /* 节点/连线颜色用内联 style 绑定（vite 8 rolldown 会裁剪只出现在动态 :class 里的规则） */
 
-/* 覆盖层全屏（白色主题，与页面风格一致） */
+/* 覆盖层全屏（浅色模式保持白色主题；深色模式跟随 --bg-page 变量切换） */
 .mm-overlay {
   position: fixed;
   inset: 0;
   z-index: 200;
-  background: rgba(255, 255, 255, 0.98);
+  background: var(--bg-page, rgba(255, 255, 255, 0.98));
   display: flex;
   flex-direction: column;
 }

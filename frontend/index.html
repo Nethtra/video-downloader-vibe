@@ -6,6 +6,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="粘贴链接即可下载全网视频：支持 B站、抖音、YouTube、小红书等上千个平台，无需登录，手机电脑都能用。" />
     <title>极易下 - 万能视频下载，一键保存</title>
+    <script>
+      /* 主题防闪烁：Vue 挂载前按 localStorage/系统配色设好 html.dark（与 theme.js 幂等） */
+      (function () {
+        try {
+          var t = localStorage.getItem('theme') || 'auto'
+          if (t === 'dark' || (t === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches)) {
+            document.documentElement.classList.add('dark')
+          }
+        } catch (e) {}
+      })()
+    </script>
   </head>
   <body>
     <div id="app"></div>

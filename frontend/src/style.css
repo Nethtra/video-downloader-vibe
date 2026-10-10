@@ -9,10 +9,42 @@
   --text-3: #8aa09a;
   --bg-page: #f4faf9;
   --bg-card: #ffffff;
+  --bg-elevated: #ffffff;   /* 卡片/输入框白底（深色模式换深色面板） */
   --border: #dbe8e5;
   --radius: 10px;
   --shadow: 0 1px 3px rgba(21, 37, 35, 0.05);
   --shadow-lift: 0 6px 20px rgba(21, 37, 35, 0.08);
+  /* 语义色（默认值 = 原硬编码值，浅色模式外观零变化） */
+  --danger: #c2453a;
+  --ok-bg: #e1f5ee;        --ok-text: #0f6e56;
+  --badge-teal-bg: #e2f4f1; --badge-teal-text: #0f766e;
+  --badge-amber-bg: #f5ecdd; --badge-amber-text: #a3762a;
+  --btn-disabled: #8ec8c2;
+  --nav-bg: rgba(255, 255, 255, 0.92);
+  --scroll-thumb: #c2ded9;  --scroll-thumb-hover: #a7cec8;
+  color-scheme: light;
+}
+
+/* 深色模式：html.dark 由 theme.js 三态切换（auto/light/dark）控制 */
+html.dark {
+  --primary-bg: #0e3b36;
+  --text-1: #e6efec;
+  --text-2: #a3bab5;
+  --text-3: #64807a;
+  --bg-page: #0c1615;
+  --bg-card: #12201e;
+  --bg-elevated: #162927;
+  --border: #243b37;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --shadow-lift: 0 6px 20px rgba(0, 0, 0, 0.5);
+  --danger: #f2827a;
+  --ok-bg: #0d3328;        --ok-text: #6ee7b7;
+  --badge-teal-bg: #0e3b36; --badge-teal-text: #5eead4;
+  --badge-amber-bg: #3a2f14; --badge-amber-text: #e5c07b;
+  --btn-disabled: #2a4a45;
+  --nav-bg: rgba(12, 22, 21, 0.88);
+  --scroll-thumb: #2a4a45;  --scroll-thumb-hover: #3c635d;
+  color-scheme: dark;
 }
 
 * {
@@ -49,10 +81,10 @@ input {
   font-family: inherit;
 }
 
-/* 细滚动条（低饱和灰） */
+/* 细滚动条（低饱和灰，跟随主题） */
 ::-webkit-scrollbar { width: 8px; height: 8px; }
-::-webkit-scrollbar-thumb { background: #c2ded9; border-radius: 4px; }
-::-webkit-scrollbar-thumb:hover { background: #a7cec8; }
+::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); }
 ::-webkit-scrollbar-track { background: transparent; }
 
 .container {
