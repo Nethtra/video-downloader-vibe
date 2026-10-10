@@ -149,7 +149,6 @@ def query_order(order_id: str):
 
 class SummaryReq(BaseModel):
     url: str
-    bili_cookie: str = ""  # 用户自带 B站 Cookie（BibiGPT 模式，仅当次请求使用，不落盘）
 
 
 def _extract_url(text: str) -> str:
@@ -175,7 +174,7 @@ def create_summary(req: SummaryReq, request: Request):
     if not url:
         raise HTTPException(400, "请输入视频链接（或包含链接的分享口令）")
     try:
-        return {"task_id": summarizer.start_summary(url, _client_ip(request), req.bili_cookie)}
+        return {"task_id": summarizer.start_summary(url, _client_ip(request))}
     except RuntimeError as e:
         raise HTTPException(400, str(e))
     except downloader.yt_dlp.utils.DownloadError:
