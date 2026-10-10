@@ -1,7 +1,7 @@
 # 极易下 - 万能视频下载网站
 
 基于开源项目 [yt-dlp](https://github.com/yt-dlp/yt-dlp) 封装的视频下载网站。
-前端 Vue 3 + Vite，后端 FastAPI，无数据库（任务状态存内存），轻量单服务部署。
+前端 Vue 3 + Vite，后端 FastAPI；任务状态存内存，用户/订单/会话存 SQLite（零依赖标准库），轻量单服务部署。
 
 | 文档 | 说明 |
 |------|------|
@@ -9,6 +9,9 @@
 | [docs/02-方案设计.md](docs/02-方案设计.md) | 架构、选型理由、核心流程、抖音通道与支付模块设计 |
 | [docs/03-AI视频总结功能方案.md](docs/03-AI视频总结功能方案.md) | AI 总结：竞品调研、字幕/降级路线、LLM 接入、限流设计 |
 | [docs/04-功能扩展与前端改版.md](docs/04-功能扩展与前端改版.md) | 导图全屏/字幕下载、总结质量调优、UI 改版与国际化、线上部署实录 |
+| [docs/05-SEO优化与运营清单.md](docs/05-SEO优化与运营清单.md) | 后端运行时 SEO 注入、robots/sitemap、GEO（llms.txt）、站长运营清单 |
+| [docs/06-支付与会员系统.md](docs/06-支付与会员系统.md) | 登录系统、Stripe Checkout、幂等三层、权益门禁、Stripe 配置手册 |
+| [docs/07-落地页改版与会员体验.md](docs/07-落地页改版与会员体验.md) | 落地页信息架构、视觉决策、内容真实性原则 |
 | 本文档（README） | 快速上手与运维手册 |
 
 ## 功能
@@ -22,7 +25,10 @@
 - **多语言**：简体中文 / English / 日本語 / 한국어 / Español / Français，导航栏切换，自动记忆
 - 紧凑双栏工作台布局（左侧视频信息+下载操作，右侧 AI 总结面板），Teal 低饱和配色
 - 下载进度实时显示，文件与总结结果保留 30 分钟自动清理
-- 会员定价展示 + 支付流程（当前为**模拟支付**，预留真实渠道接入接口）
+- **账号与会员**：邮箱密码注册/登录（scrypt 加盐哈希，HttpOnly Cookie 会话），订单归属用户；会员享 AI 总结不限次 + 解除 1080p 清晰度上限（服务端强制）
+- **Stripe 支付**：Checkout 托管支付页（一次性购买，CNY），月卡 +30 天 / 年卡 +365 天自动叠加；幂等三层防重复开通，webhook 验签 + 回跳轮询双通道不丢单；未配置密钥自动回退模拟收银台
+- 下载进度实时显示，文件与总结结果保留 30 分钟自动清理
+- 落地页：深色渐变 Hero + 真实数据统计带、AI 总结效果展示、使用场景、底部 CTA（详见 docs/07）
 
 ## 平台支持现状（实测）
 
@@ -50,15 +56,20 @@ video-downloader/
 ├── backend/
 │   ├── app/
 │   │   ├── main.py         # FastAPI 路由 + 前端静态托管 + 异常兜底
-│   │   ├── downloader.py   # 下载调度（平台分流 / 任务表 / 清理）
+│   │   ├── downloader.py   # 下载调度（平台分流 / 任务表 / 清理 / 清晰度门禁）
 │   │   ├── douyin.py       # 抖音免 Cookie 通道（自研：访客 ttwid + iesdouyin 分享页）
 │   │   ├── summarizer.py   # AI 视频总结（字幕提取 / LLM 抽象 / 限流 / 总结任务表）
-│   │   └── payments.py     # 支付抽象层 + 模拟支付实现
+│   │   ├── payments.py     # 支付抽象层：StripeProvider（Checkout）+ MockProvider（回退）
+│   │   ├── auth.py         # 注册/登录（scrypt）/ Cookie 会话 / 会员判定
+│   │   ├── db.py           # SQLite 封装（users/sessions/orders/webhook 去重）
+│   │   ├── envutil.py      # 统一 .env 加载
+│   │   └── seo.py          # SEO 运行时注入 + robots/sitemap/llms.txt
+│   ├── data/               # SQLite 数据库（app.db，自动创建，勿提交）
 │   ├── cookies/
 │   │   └── cookies.txt     # 其它平台可选 Cookie（抖音已无需；B站 AI 字幕需有效登录态）
 │   ├── downloads/          # 下载临时目录（自动清理，勿存重要文件）
 │   ├── static/             # 前端构建产物（vite outDir，构建自动生成）
-│   ├── .env.example        # AI 总结环境变量模板（复制为 .env 填 LLM_API_KEY）
+│   ├── .env.example        # 环境变量模板（LLM_API_KEY / STRIPE_API_KEY 等）
 │   ├── run.py              # 启动入口 (0.0.0.0:8000，支持 PORT 环境变量)
 │   └── requirements.txt
 └── frontend/               # Vue 3 + Vite 工程
@@ -124,16 +135,15 @@ cp .env.example .env    # 然后编辑 .env 填入 LLM_API_KEY
 > YouTube 年龄限制视频例外：需在 `backend/cookies/cookies.txt` 配置已登录且通过年龄
 > 验证的账号 Cookie（见上方 Cookie 维护），配置后自动带 Cookie 定向重试。
 
-## 接入真实支付
+## 支付与会员（Stripe 已接入）
 
-支付逻辑已抽象为 `backend/app/payments.py` 中的 `PaymentProvider` 接口：
+完整架构、环境变量、Stripe Dashboard 配置步骤与测试卡见 **[docs/06-支付与会员系统.md](docs/06-支付与会员系统.md)**。快速版：
 
-- `create_payment(order)` → 返回收银台信息（跳转链接/二维码）
-- `query_payment(order_id)` → 查询支付状态
-- `verify_notify(payload)` → 校验渠道异步回调签名
+1. `backend/.env` 填入 `STRIPE_API_KEY=sk_test_...`（Dashboard → Test Mode → API keys）
+2. 本地 webhook：安装 Stripe CLI → `stripe listen --forward-to localhost:8000/api/pay/stripe/webhook`，把输出的 `whsec_...` 填入 `STRIPE_WEBHOOK_SECRET`
+3. 测试卡 `4242 4242 4242 4242`（任意未来有效期/CVC）；上线切换 Live 密钥 + Dashboard 配置公网 webhook endpoint
 
-接入虎皮椒/蓝兔/微信商户号时，实现该接口并替换模块级 `provider` 实例即可，
-路由与前端代码零改动。当前 `MockProvider` 用于演示（前端弹模拟收银台）。
+支付逻辑抽象于 `backend/app/payments.py` 的 `PaymentProvider` 接口，`StripeProvider` / `MockProvider` 由 `STRIPE_API_KEY` 是否存在自动切换；未配置密钥时本地仍可走完整模拟流程。
 
 ## 已知限制
 
