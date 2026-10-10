@@ -806,7 +806,9 @@ def _today() -> str:
     return datetime.date.today().isoformat()
 
 
-def quota_of(ip: str) -> dict:
+def quota_of(ip: str, vip: bool = False) -> dict:
+    if vip:
+        return {"vip": True, "used": 0, "limit": None, "remaining": None}
     with _quota_lock:
         rec = _quota.get(ip)
         used = rec["count"] if rec and rec["date"] == _today() else 0
@@ -840,10 +842,11 @@ def _executor_instance():
     return _executor
 
 
-def start_summary(url: str, ip: str) -> str:
+def start_summary(url: str, ip: str, exempt: bool = False) -> str:
     if not HAS_LLM:
         raise RuntimeError("AI 总结功能正在开通中，敬请期待")
-    _consume_quota(ip)  # 先扣额度，失败直接抛可读错误
+    if not exempt:
+        _consume_quota(ip)  # 先扣额度，失败直接抛可读错误；会员(exempt)不限次
     task_id = uuid.uuid4().hex[:12]
     with _lock:
         _summaries[task_id] = {

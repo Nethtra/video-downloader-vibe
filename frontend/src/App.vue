@@ -3,8 +3,86 @@ import { ref, computed, watch, nextTick, onBeforeUnmount } from 'vue'
 import MindMap from './components/MindMap.vue'
 import { t, tl, locale, setLocale, LANGS } from './i18n'
 import { theme, setTheme } from './theme'
+import { approx } from './currency'
 
 const THEMES = ['auto', 'light', 'dark']
+
+/* ---------------- 登录 / 会员状态 ---------------- */
+const user = ref(null)            // {email, vip_until, is_vip} | null
+const authModal = ref(false)
+const authMode = ref('login')     // login | register
+const authForm = ref({ email: '', password: '' })
+const authError = ref('')
+const authBusy = ref(false)
+// 记录"登录前想做的事"：登录成功后自动继续（如完成购买）
+let pendingAction = null
+
+async function refreshUser() {
+  try {
+    const r = await fetch('/api/auth/me')
+    if (r.ok) user.value = (await r.json()).user
+  } catch { /* 忽略 */ }
+}
+
+function openAuth(mode, intent) {
+  authMode.value = mode
+  authError.value = ''
+  authForm.value = { email: user.value?.email || '', password: '' }
+  pendingAction = intent || null
+  authModal.value = true
+}
+
+async function submitAuth() {
+  if (authBusy.value) return
+  authBusy.value = true
+  authError.value = ''
+  try {
+    const res = await fetch(`/api/auth/${authMode.value}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(authForm.value),
+    })
+    const data = await readJson(res)
+    if (!res.ok) {
+      const detail = data.detail || ''
+      authError.value = detail.includes('已注册') ? t('auth.emailTaken')
+        : detail.includes('密码') ? detail
+        : detail.includes('错误') ? t('auth.badCredentials') : detail
+      return
+    }
+    authModal.value = false
+    await refreshUser()
+    const act = pendingAction
+    pendingAction = null
+    if (act) act()   // 登录成功，继续之前被拦下的动作（如购买）
+  } catch (e) {
+    authError.value = e.message
+  } finally {
+    authBusy.value = false
+  }
+}
+
+async function logout() {
+  try { await fetch('/api/auth/logout', { method: 'POST' }) } catch { /* 忽略 */ }
+  user.value = null
+  await loadQuota()
+}
+
+const isVip = computed(() => !!user.value?.is_vip)
+const vipUntilText = computed(() => {
+  if (!user.value?.vip_until) return ''
+  const d = new Date(user.value.vip_until)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+})
+/* 会员剩余天数（向上取整，最少显示 1 天），导航栏直观展示 */
+const vipDaysLeft = computed(() => {
+  if (!user.value?.vip_until) return 0
+  const diff = new Date(user.value.vip_until).getTime() - Date.now()
+  return Math.max(1, Math.ceil(diff / 86400000))
+})
+
+refreshUser()
+
 
 /* ---------------- 分析与下载 ---------------- */
 const url = ref('')
@@ -113,11 +191,11 @@ function reset() {
   url.value = ''
 }
 
-/* ---------------- 会员购买（模拟支付） ---------------- */
+/* ---------------- 会员购买（Stripe Checkout / Mock 回退） ---------------- */
 const plans = ref([])
 const payModal = ref(false)
 const payOrder = ref(null)
-const payState = ref('qr') // qr | paying | paid
+const payState = ref('qr') // redirecting | qr | paying | confirming | paid
 let payPoll = null
 
 async function loadPlans() {
@@ -151,7 +229,7 @@ async function createOrder(plan) {
   const res = await fetch('/api/pay/order', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ plan_id: plan.id }),
+    body: JSON.stringify({ plan_id: plan.id, locale: locale.value }),
   })
   const data = await res.json()
   if (!res.ok) throw new Error(data.detail || t('err.order'))
@@ -159,27 +237,63 @@ async function createOrder(plan) {
 }
 
 async function startPay(plan) {
+  if (!user.value) {
+    // 未登录先登录，成功后自动继续本次购买
+    openAuth('login', () => startPay(plan))
+    return
+  }
   try {
     selectedPlan.value = plan
     payOrder.value = null
-    payState.value = 'paying'
+    payState.value = 'redirecting'
     payModal.value = true
     const order = await createOrder(plan)
+    if (order.pay?.pay_type === 'stripe_redirect') {
+      // 跳 Stripe 托管支付页；支付完成后重定向回 ?pay=success&order=xxx
+      window.location.href = order.pay.pay_url
+      return
+    }
+    // mock 渠道（后端未配 STRIPE_API_KEY）：模拟收银台
     payOrder.value = order
-    // 轮询订单状态（真实渠道下由服务端异步回调改变状态）
-    payPoll = setInterval(async () => {
-      const r = await fetch(`/api/pay/order/${order.order_id}`)
+    payState.value = 'paying'
+    pollPaid(order.order_id)
+  } catch (e) {
+    payModal.value = false
+    errorMsg.value = e.message
+  }
+}
+
+function pollPaid(orderId) {
+  // 轮询订单状态；后端在 paying 时会主动向 Stripe 同步（webhook 未达的兜底）
+  payPoll = setInterval(async () => {
+    try {
+      const r = await fetch(`/api/pay/order/${orderId}`)
+      if (!r.ok) return
       const d = await r.json()
       if (d.status === 'paid') {
         payState.value = 'paid'
         clearInterval(payPoll)
+        await refreshUser()
+        await loadQuota()
       }
-    }, 1500)
-  } catch (e) {
-    payState.value = 'qr'
-    errorMsg.value = e.message
+    } catch { /* 网络抖动，下一轮重试 */ }
+  }, 1500)
+}
+
+/* Stripe 支付完成回跳：/?pay=success&order=xxx -> 弹「确认中」并轮询到 paid */
+function handlePayRedirect() {
+  const q = new URLSearchParams(location.search)
+  if (q.get('pay') === 'success' && q.get('order')) {
+    const orderId = q.get('order')
+    history.replaceState({}, '', location.pathname + location.hash) // 清参数，防刷新重复弹
+    selectedPlan.value = null
+    payOrder.value = { order_id: orderId }
+    payState.value = 'confirming'
+    payModal.value = true
+    pollPaid(orderId)
   }
 }
+handlePayRedirect()
 
 async function confirmMockPay() {
   if (!payOrder.value) return
@@ -194,6 +308,15 @@ async function confirmMockPay() {
 function closePay() {
   payModal.value = false
   clearInterval(payPoll)
+}
+
+/* 清晰度选择：4K 为会员专享（服务端同样强制），非会员点击给出提示 */
+function selectFormat(f) {
+  if (f.height >= 2160 && !isVip.value) {
+    errorMsg.value = t('fmt.vipLock')
+    return
+  }
+  selectedFormat.value = f.format_id
 }
 
 /* ---------------- AI 视频总结 v2（SSE 流式 + 页内选项卡） ---------------- */
@@ -516,6 +639,19 @@ onBeforeUnmount(() => {
       <select class="lang-select" :value="theme" :aria-label="t('nav.theme')" @change="setTheme($event.target.value)">
         <option v-for="th in THEMES" :key="th" :value="th">{{ t('theme.' + th) }}</option>
       </select>
+      <template v-if="user">
+        <span class="user-chip" :class="{ vip: isVip }"
+              :title="isVip ? t('nav.vipUntil', { d: vipUntilText }) : user.email">
+          <span class="user-name">{{ user.email.split('@')[0] }}</span>
+          <b v-if="isVip" class="vip-badge">
+            <svg viewBox="0 0 24 24" width="9" height="9" fill="currentColor" aria-hidden="true"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z"/></svg>
+            {{ t('nav.vip') }}
+          </b>
+          <span v-if="isVip" class="vip-days">{{ t('nav.vipDays', { d: vipDaysLeft }) }}</span>
+        </span>
+        <button class="link-btn" @click="logout">{{ t('nav.logout') }}</button>
+      </template>
+      <button v-else class="btn btn-sm btn-outline" @click="openAuth('login')">{{ t('nav.login') }}</button>
       <a class="btn btn-sm" href="#hero">{{ t('nav.start') }}</a>
     </div>
   </header>
@@ -570,10 +706,11 @@ onBeforeUnmount(() => {
               v-for="f in videoFormats"
               :key="f.format_id"
               class="fmt-chip"
-              :class="{ active: selectedFormat === f.format_id, vip: f.height >= 2160 }"
-              @click="selectedFormat = f.format_id"
+              :class="{ active: selectedFormat === f.format_id, vip: f.height >= 2160 && !isVip }"
+              @click="selectFormat(f)"
             >
               {{ f.label }}
+              <svg v-if="f.height >= 2160 && !isVip" class="vip-lock" viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><rect x="4" y="11" width="16" height="9" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/></svg>
               <small v-if="f.filesize">{{ fmtSize(f.filesize) }}</small>
             </button>
             <button
@@ -617,7 +754,8 @@ onBeforeUnmount(() => {
             <button class="btn ai-btn" :disabled="summaryBusy" @click="startSummary">
               <span v-if="summaryBusy" class="spinner"></span>{{ summaryPhaseText }}
             </button>
-            <span v-if="quota" class="quota-tip">{{ t('ai.quota', { r: quota.remaining, l: quota.limit }) }}</span>
+            <span v-if="quota && quota.vip" class="quota-tip vip">{{ t('ai.quotaVip') }}</span>
+            <span v-else-if="quota" class="quota-tip">{{ t('ai.quota', { r: quota.remaining, l: quota.limit }) }}</span>
           </div>
           <p v-if="summaryMsg" class="error-tip">{{ summaryMsg }}</p>
 
@@ -787,6 +925,7 @@ onBeforeUnmount(() => {
           <div class="plan-price">
             <template v-if="p.price > 0"><em>¥</em>{{ p.price }}<small>{{ p.period }}</small></template>
             <template v-else><em>¥</em>0<small>{{ t('plans.free.p') }}</small></template>
+            <small v-if="approx(p.price, locale)" class="price-approx">{{ approx(p.price, locale) }}</small>
           </div>
           <ul class="plan-feats">
             <li v-for="f in p.features" :key="f">✓ {{ f }}</li>
@@ -796,7 +935,7 @@ onBeforeUnmount(() => {
             :class="{ 'btn-outline': !p.highlight, 'btn-lg': p.highlight }"
             @click="p.price > 0 ? startPay(p) : null"
           >
-            {{ p.price > 0 ? t('pricing.buy') : t('pricing.freeBtn') }}
+            {{ p.price > 0 ? (isVip ? t('pricing.renew') : t('pricing.buy')) : t('pricing.freeBtn') }}
           </button>
         </div>
       </div>
@@ -843,10 +982,49 @@ onBeforeUnmount(() => {
     </div>
   </footer>
 
-  <!-- ===== 模拟收银台弹窗 ===== -->
+  <!-- ===== 登录 / 注册弹窗 ===== -->
+  <div v-if="authModal" class="modal-mask" @click.self="authModal = false">
+    <div class="modal auth-modal">
+      <h3 class="modal-title">{{ authMode === 'login' ? t('auth.loginTitle') : t('auth.registerTitle') }}</h3>
+      <form class="auth-form" @submit.prevent="submitAuth">
+        <label class="auth-field">
+          <span>{{ t('auth.email') }}</span>
+          <input v-model="authForm.email" type="email" required autocomplete="email" />
+        </label>
+        <label class="auth-field">
+          <span>{{ t('auth.password') }}</span>
+          <input v-model="authForm.password" type="password" minlength="8" required
+                 :autocomplete="authMode === 'login' ? 'current-password' : 'new-password'" />
+        </label>
+        <p v-if="authError" class="error-tip">{{ authError }}</p>
+        <button class="btn btn-block btn-lg" type="submit" :disabled="authBusy">
+          {{ authMode === 'login' ? t('auth.submitLogin') : t('auth.submitRegister') }}
+        </button>
+      </form>
+      <button class="link-btn" @click="authMode = authMode === 'login' ? 'register' : 'login'; authError = ''">
+        {{ authMode === 'login' ? t('auth.toRegister') : t('auth.toLogin') }}
+      </button>
+    </div>
+  </div>
+
+  <!-- ===== 支付弹窗（Stripe 跳转 / 模拟收银台 / 结果确认） ===== -->
   <div v-if="payModal" class="modal-mask" @click.self="closePay">
     <div class="modal">
-      <template v-if="payState === 'paying'">
+      <template v-if="payState === 'redirecting'">
+        <h3 class="modal-title">{{ selectedPlan?.name }}</h3>
+        <div class="pay-success">
+          <span class="spinner"></span>
+          <p>{{ t('pay.redirecting') }}</p>
+        </div>
+      </template>
+      <template v-else-if="payState === 'confirming'">
+        <div class="pay-success">
+          <span class="spinner"></span>
+          <h3>{{ t('pay.confirming') }}</h3>
+        </div>
+        <button class="link-btn" @click="closePay">{{ t('pay.cancel') }}</button>
+      </template>
+      <template v-else-if="payState === 'paying'">
         <h3 class="modal-title">{{ selectedPlan?.name }}</h3>
         <p class="modal-amount">¥ {{ selectedPlan?.price }}</p>
         <div class="fake-qr" aria-hidden="true">
@@ -860,7 +1038,11 @@ onBeforeUnmount(() => {
         <div class="pay-success">
           <div class="success-icon">✓</div>
           <h3>{{ t('pay.success') }}</h3>
-          <p>{{ t('pay.successDesc', { n: selectedPlan?.name }) }}<br />{{ t('pay.mockNote') }}</p>
+          <p>
+            <template v-if="selectedPlan">{{ t('pay.successDesc', { n: selectedPlan.name }) }}<br /></template>
+            <template v-if="vipUntilText">{{ t('nav.vipUntil', { d: vipUntilText }) }}<br /></template>
+            <template v-if="payOrder?.pay?.pay_type === 'mock_qr'">{{ t('pay.mockNote') }}</template>
+          </p>
         </div>
         <button class="btn btn-block btn-lg" @click="closePay">{{ t('pay.ok') }}</button>
       </template>
@@ -1296,6 +1478,33 @@ export default {
 .footer-copy { color: var(--text-3); font-size: 12px; }
 
 /* ===== 模拟收银台 ===== */
+/* ---- 登录 / 会员状态 ---- */
+.user-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  max-width: 150px; padding: 4px 10px; border: 1px solid var(--border);
+  border-radius: 999px; font-size: 12.5px; background: var(--card);
+}
+.user-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vip-badge {
+  display: inline-flex; align-items: center; gap: 3px;
+  font-size: 10px; font-weight: 700; color: #fff; background: linear-gradient(135deg, #f59e0b, #ea580c);
+  padding: 1.5px 6px; border-radius: 999px; letter-spacing: .5px; flex: none;
+}
+.user-chip.vip { max-width: 230px; border-color: rgba(245, 158, 11, 0.6); background: rgba(245, 158, 11, 0.07); }
+.vip-days { font-size: 11.5px; font-weight: 500; color: #f59e0b; white-space: nowrap; }
+.auth-form { display: flex; flex-direction: column; gap: 12px; margin: 14px 0 6px; }
+.auth-field { display: flex; flex-direction: column; gap: 5px; font-size: 12.5px; color: var(--text-2); }
+.auth-field input {
+  padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px;
+  background: var(--bg); color: var(--text); font-size: 14px; outline: none;
+}
+.auth-field input:focus { border-color: var(--primary); }
+.price-approx { display: block; margin-top: 3px; font-weight: 400; }
+.quota-tip.vip { color: #ea580c; font-weight: 600; }
+.fmt-chip.vip { opacity: .62; }
+.fmt-chip .vip-lock { color: #ea580c; vertical-align: -1px; margin-left: 2px; }
+.fmt-chip.active .vip-lock { color: #fff; }
+
 .modal-mask {
   position: fixed;
   inset: 0;
