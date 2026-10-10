@@ -330,7 +330,8 @@ def _progress_hook(task_id, status_dict):
             task["progress"] = max(task.get("progress", 0), 99)
 
 
-def _run_download(task_id: str, url: str, format_id: str, mode: str):
+def _run_download(task_id: str, url: str, format_id: str, mode: str,
+                  max_height: int | None = None):
     outtmpl = str(DOWNLOAD_DIR / f"{task_id}.%(ext)s")
 
     def merge_hook(d):
@@ -345,6 +346,10 @@ def _run_download(task_id: str, url: str, format_id: str, mode: str):
         if not HAS_FFMPEG:
             raise RuntimeError("服务端未安装 ffmpeg，暂不支持音频提取")
         fmt = "bestaudio/best"
+    elif max_height and HAS_FFMPEG:
+        # 非会员清晰度门禁：无视前端传的 format_id（它可能指向更高清的流），
+        # 整体替换为带 1080p 上限的表达式（仍走"视频流+音轨合并"防无声视频）
+        fmt = f"bv*[height<={max_height}]+ba/b[height<={max_height}]/b"
     elif format_id and format_id != "best":
         # DASH 平台（B站/YouTube 等）的单个清晰度是"无音轨的纯视频流"，
         # 必须显式拼接最佳音轨让 yt-dlp 用 ffmpeg 合并，否则下载出来的是无声视频。
@@ -484,7 +489,8 @@ def _run_douyin_download(task_id: str, url: str, format_id: str, mode: str):
                 t.update({"status": "error", "error": str(e)[:500]})
 
 
-def start_download(url: str, format_id: str = "best", mode: str = "video") -> str:
+def start_download(url: str, format_id: str = "best", mode: str = "video",
+                   max_height: int | None = None) -> str:
     task_id = uuid.uuid4().hex[:12]
     with _lock:
         _tasks[task_id] = {
@@ -499,9 +505,11 @@ def start_download(url: str, format_id: str = "best", mode: str = "video") -> st
             "created_at": time.time(),
         }
     if is_douyin_url(url):
+        # 抖音独立通道：单一清晰度，不适用会员门禁
         _executor_instance().submit(_run_douyin_download, task_id, url, format_id, mode)
     else:
-        _executor_instance().submit(_run_download, task_id, url, format_id, mode)
+        _executor_instance().submit(_run_download, task_id, url, format_id, mode,
+                                    max_height=max_height)
     return task_id
 
 

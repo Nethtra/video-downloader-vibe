@@ -1,25 +1,34 @@
 import asyncio
 import json
 import mimetypes
+import os
 import re
 import time
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from pathlib import Path
 
-from . import downloader, payments, seo, summarizer
+from . import auth, db, downloader, payments, seo, summarizer
+from .envutil import load_env
+
+load_env()
+db.init_db()
 
 app = FastAPI(title="万能视频下载", docs_url=None, redoc_url=None)
 
+# CORS 收紧：本服务前后端同源托管，默认不放开跨域；
+# 如有独立域名的 H5/小程序需要跨域调用，在 .env 配 ALLOWED_ORIGINS=逗号分隔列表
+_allowed_origins = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_allowed_origins,
     allow_methods=["*"],
     allow_headers=["*"],
+    allow_credentials=True,
 )
 
 
@@ -35,10 +44,16 @@ class DownloadReq(BaseModel):
 
 class OrderReq(BaseModel):
     plan_id: str
+    locale: str = ""  # 前端当前语言，用于 Stripe Checkout 页面语言
 
 
 class MockConfirmReq(BaseModel):
     order_id: str
+
+
+class AuthReq(BaseModel):
+    email: str
+    password: str
 
 
 @app.post("/api/analyze")
@@ -91,11 +106,15 @@ def analyze_status(analyze_id: str):
 
 
 @app.post("/api/download")
-def download(req: DownloadReq):
+def download(req: DownloadReq, request: Request):
     url = req.url.strip()
     if not url.startswith(("http://", "https://")):
         raise HTTPException(400, "无效的视频链接")
-    task_id = downloader.start_download(url, req.format_id, req.mode)
+    # 会员权益门禁：非会员服务端强制 1080p 上限（不信任前端传的 format_id）；
+    # 音频提取、抖音通道不受影响
+    user = auth.current_user(request)
+    max_height = None if auth.is_vip(user) else 1080
+    task_id = downloader.start_download(url, req.format_id, req.mode, max_height=max_height)
     return {"task_id": task_id}
 
 
@@ -116,21 +135,88 @@ def download_file(task_id: str):
     return FileResponse(path, filename=path.name, media_type=media_type)
 
 
+# ---------- 登录 / 注册（会员体系） ----------
+
+@app.post("/api/auth/register")
+def auth_register(req: AuthReq, response: Response):
+    try:
+        user = auth.register(req.email, req.password)
+    except ValueError as e:
+        code = str(e)
+        if code == "email_taken":
+            raise HTTPException(409, "该邮箱已注册，请直接登录")
+        if code == "weak_password":
+            raise HTTPException(400, "密码至少 8 位")
+        raise HTTPException(400, "邮箱格式不正确")
+    return auth.start_session(user, response)
+
+
+@app.post("/api/auth/login")
+def auth_login(req: AuthReq, response: Response):
+    try:
+        user, _token = auth.login(req.email, req.password)
+    except ValueError:
+        raise HTTPException(401, "邮箱或密码错误")
+    return auth.start_session(user, response)
+
+
+@app.post("/api/auth/logout")
+def auth_logout(request: Request, response: Response):
+    auth.logout(request.cookies.get(auth.COOKIE_NAME) or "")
+    auth.clear_auth_cookie(response)
+    return {"ok": True}
+
+
+@app.get("/api/auth/me")
+def auth_me(request: Request):
+    """未登录也返回 200（user=null），前端免判 401。"""
+    user = auth.current_user(request)
+    return {"user": auth.user_payload(user) if user else None}
+
+
+# ---------- 套餐与支付 ----------
+
 @app.get("/api/plans")
 def plans():
     return payments.PLANS
 
 
+@app.get("/api/pay/config")
+def pay_config():
+    """前端调试用：当前支付渠道（stripe=真实收款 / mock=本地模拟）。"""
+    return {"provider": payments.provider.name}
+
+
 @app.post("/api/pay/order")
-def create_order(req: OrderReq):
-    result = payments.create_order(req.plan_id)
-    if "error" in result:
+def create_order(req: OrderReq, request: Request):
+    user = auth.current_user(request)
+    if not user:
+        raise HTTPException(401, "请先登录后再购买")
+    result = payments.create_order(req.plan_id, user, req.locale)
+    if result.get("error") == "invalid_plan":
         raise HTTPException(400, "无效的付费方案")
+    if result.get("error"):
+        raise HTTPException(502, "支付渠道暂时不可用，请稍后重试")
     return result
+
+
+@app.post("/api/pay/stripe/webhook")
+async def stripe_webhook(request: Request):
+    """Stripe 服务器回调：必须拿原始 body 验签，不能用 Pydantic 解析。
+    验签失败返回 400，Stripe 会按策略重试。"""
+    payload = await request.body()
+    sig = request.headers.get("stripe-signature", "")
+    try:
+        return payments.handle_webhook(payload, sig)
+    except Exception:
+        raise HTTPException(400, "webhook 验签失败")
 
 
 @app.post("/api/pay/mock/confirm")
 def mock_confirm(req: MockConfirmReq):
+    """模拟支付确认：仅 mock 渠道可用，真实收款环境一律 403（防免费开通会员）。"""
+    if payments.provider.name != "mock":
+        raise HTTPException(403, "非演示环境不可用")
     result = payments.confirm_mock_payment(req.order_id)
     if "error" in result:
         raise HTTPException(404, "订单不存在")
@@ -173,8 +259,11 @@ def create_summary(req: SummaryReq, request: Request):
     url = _extract_url(req.url)
     if not url:
         raise HTTPException(400, "请输入视频链接（或包含链接的分享口令）")
+    # 会员不限次：is_vip 为真时跳过 IP 每日限流
+    user = auth.current_user(request)
     try:
-        return {"task_id": summarizer.start_summary(url, _client_ip(request))}
+        return {"task_id": summarizer.start_summary(url, _client_ip(request),
+                                                    exempt=auth.is_vip(user))}
     except RuntimeError as e:
         raise HTTPException(400, str(e))
     except downloader.yt_dlp.utils.DownloadError:
@@ -187,7 +276,8 @@ def create_summary(req: SummaryReq, request: Request):
 
 @app.get("/api/summary/quota")  # 注意：必须注册在 /{task_id} 之前，否则被当 task_id 吞掉
 def summary_quota(request: Request):
-    return summarizer.quota_of(_client_ip(request))
+    user = auth.current_user(request)
+    return summarizer.quota_of(_client_ip(request), vip=auth.is_vip(user))
 
 
 @app.get("/api/summary/{task_id}")
@@ -295,6 +385,10 @@ async def periodic_cleanup():
                 pass
             try:
                 summarizer.cleanup_expired()
+            except Exception:
+                pass
+            try:
+                db.cleanup_expired()  # 清过期登录会话
             except Exception:
                 pass
     asyncio.create_task(cleaner())

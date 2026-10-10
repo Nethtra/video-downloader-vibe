@@ -79,6 +79,12 @@ const zhCN = {
   'err.summaryFail': '总结失败，请稍后重试',
   'err.summaryTimeout': '总结超时，请稍后重试',
   'alt.cover': '视频封面',
+  'nav.login': '登录 / 注册', 'nav.logout': '退出', 'nav.vip': '会员', 'nav.vipUntil': '有效期至 {d}', 'nav.vipDays': '剩 {d} 天', 'pricing.renew': '续费会员',
+  'auth.loginTitle': '登录', 'auth.registerTitle': '注册账号', 'auth.email': '邮箱', 'auth.password': '密码（至少 8 位）',
+  'auth.submitLogin': '登录', 'auth.submitRegister': '注册', 'auth.toRegister': '没有账号？注册', 'auth.toLogin': '已有账号？登录',
+  'auth.needLogin': '请先登录后再购买', 'auth.emailTaken': '该邮箱已注册，请直接登录', 'auth.badCredentials': '邮箱或密码错误',
+  'pay.redirecting': '正在跳转到支付页面…', 'pay.confirming': '支付确认中…',
+  'ai.quotaVip': '会员 · AI 总结不限次', 'fmt.vipLock': '会员专享', 'pricing.approx': '≈ {p}',
 
 }
 
@@ -155,6 +161,12 @@ const en = {
   'err.summaryFail': 'Summary failed. Please try again later.',
   'err.summaryTimeout': 'Summary timed out. Please try again later.',
   'alt.cover': 'Video cover',
+  'nav.login': 'Sign in', 'nav.logout': 'Sign out', 'nav.vip': 'VIP', 'nav.vipUntil': 'Valid until {d}', 'nav.vipDays': '{d}d left', 'pricing.renew': 'Renew',
+  'auth.loginTitle': 'Sign in', 'auth.registerTitle': 'Create account', 'auth.email': 'Email', 'auth.password': 'Password (min 8 chars)',
+  'auth.submitLogin': 'Sign in', 'auth.submitRegister': 'Sign up', 'auth.toRegister': 'No account? Sign up', 'auth.toLogin': 'Have an account? Sign in',
+  'auth.needLogin': 'Please sign in to purchase', 'auth.emailTaken': 'Email already registered', 'auth.badCredentials': 'Wrong email or password',
+  'pay.redirecting': 'Redirecting to checkout…', 'pay.confirming': 'Confirming payment…',
+  'ai.quotaVip': 'Member · Unlimited AI summaries', 'fmt.vipLock': 'Members only', 'pricing.approx': '≈ {p}',
 
 }
 
@@ -231,6 +243,12 @@ const ja = {
   'err.summaryFail': '要約に失敗しました。しばらくしてからお試しください',
   'err.summaryTimeout': '要約がタイムアウトしました。しばらくしてからお試しください',
   'alt.cover': '動画カバー',
+  'nav.login': 'ログイン', 'nav.logout': 'ログアウト', 'nav.vip': '会員', 'nav.vipUntil': '有効期限 {d}', 'nav.vipDays': '残り{d}日', 'pricing.renew': '更新する',
+  'auth.loginTitle': 'ログイン', 'auth.registerTitle': 'アカウント登録', 'auth.email': 'メールアドレス', 'auth.password': 'パスワード（8文字以上）',
+  'auth.submitLogin': 'ログイン', 'auth.submitRegister': '登録', 'auth.toRegister': 'アカウントをお持ちでない？登録', 'auth.toLogin': 'アカウントをお持ちですか？ログイン',
+  'auth.needLogin': 'ご購入前にログインしてください', 'auth.emailTaken': 'このメールは既に登録済みです', 'auth.badCredentials': 'メールまたはパスワードが違います',
+  'pay.redirecting': '決済ページへ移動中…', 'pay.confirming': '支払い確認中…',
+  'ai.quotaVip': '会員 · AI要約無制限', 'fmt.vipLock': '会員限定', 'pricing.approx': '≈ {p}',
 
 }
 
@@ -307,6 +325,12 @@ const ko = {
   'err.summaryFail': '요약에 실패했습니다. 잠시 후 다시 시도해 주세요',
   'err.summaryTimeout': '요약 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요',
   'alt.cover': '영상 표지',
+  'nav.login': '로그인', 'nav.logout': '로그아웃', 'nav.vip': 'VIP', 'nav.vipUntil': '만기 {d}', 'nav.vipDays': '{d}일 남음', 'pricing.renew': '연장하기',
+  'auth.loginTitle': '로그인', 'auth.registerTitle': '회원가입', 'auth.email': '이메일', 'auth.password': '비밀번호 (8자 이상)',
+  'auth.submitLogin': '로그인', 'auth.submitRegister': '가입하기', 'auth.toRegister': '계정이 없나요? 가입', 'auth.toLogin': '계정이 있나요? 로그인',
+  'auth.needLogin': '구매 전 로그인해 주세요', 'auth.emailTaken': '이미 가입된 이메일입니다', 'auth.badCredentials': '이메일 또는 비밀번호가 틀렸습니다',
+  'pay.redirecting': '결제 페이지로 이동 중…', 'pay.confirming': '결제 확인 중…',
+  'ai.quotaVip': '회원 · AI 요약 무제한', 'fmt.vipLock': '회원 전용', 'pricing.approx': '≈ {p}',
 
 }
 
@@ -383,6 +407,12 @@ const es = {
   'err.summaryFail': 'El resumen falló. Inténtalo más tarde',
   'err.summaryTimeout': 'El resumen agotó el tiempo. Inténtalo más tarde',
   'alt.cover': 'Portada del vídeo',
+  'nav.login': 'Entrar', 'nav.logout': 'Salir', 'nav.vip': 'VIP', 'nav.vipUntil': 'Miembro hasta {d}', 'nav.vipDays': '{d} días', 'pricing.renew': 'Renovar',
+  'auth.loginTitle': 'Iniciar sesión', 'auth.registerTitle': 'Crear cuenta', 'auth.email': 'Correo', 'auth.password': 'Contraseña (mín. 8)',
+  'auth.submitLogin': 'Entrar', 'auth.submitRegister': 'Registrarse', 'auth.toRegister': '¿Sin cuenta? Regístrate', 'auth.toLogin': '¿Ya tienes cuenta? Entrar',
+  'auth.needLogin': 'Inicia sesión para comprar', 'auth.emailTaken': 'Correo ya registrado', 'auth.badCredentials': 'Correo o contraseña incorrectos',
+  'pay.redirecting': 'Redirigiendo al pago…', 'pay.confirming': 'Confirmando el pago…',
+  'ai.quotaVip': 'Miembro · Resúmenes IA ilimitados', 'fmt.vipLock': 'Solo miembros', 'pricing.approx': '≈ {p}',
 
 }
 
@@ -459,6 +489,12 @@ const fr = {
   'err.summaryFail': 'Le résumé a échoué. Réessayez plus tard',
   'err.summaryTimeout': 'Le résumé a expiré. Réessayez plus tard',
   'alt.cover': 'Miniature de la vidéo',
+  'nav.login': 'Connexion', 'nav.logout': 'Déconnexion', 'nav.vip': 'VIP', 'nav.vipUntil': "Membre jusqu'au {d}", 'nav.vipDays': '{d} j restants', 'pricing.renew': 'Renouveler',
+  'auth.loginTitle': 'Connexion', 'auth.registerTitle': 'Créer un compte', 'auth.email': 'E-mail', 'auth.password': 'Mot de passe (8 min.)',
+  'auth.submitLogin': 'Se connecter', 'auth.submitRegister': "S'inscrire", 'auth.toRegister': "Pas de compte ? S'inscrire", 'auth.toLogin': 'Déjà un compte ? Se connecter',
+  'auth.needLogin': 'Connectez-vous pour acheter', 'auth.emailTaken': 'E-mail déjà enregistré', 'auth.badCredentials': 'E-mail ou mot de passe incorrect',
+  'pay.redirecting': 'Redirection vers le paiement…', 'pay.confirming': 'Confirmation du paiement…',
+  'ai.quotaVip': 'Membre · Résumés IA illimités', 'fmt.vipLock': 'Réservé aux membres', 'pricing.approx': '≈ {p}',
 
 }
 
