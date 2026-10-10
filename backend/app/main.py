@@ -6,12 +6,12 @@ import time
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from pathlib import Path
 
-from . import downloader, payments, summarizer
+from . import downloader, payments, seo, summarizer
 
 app = FastAPI(title="万能视频下载", docs_url=None, redoc_url=None)
 
@@ -267,6 +267,9 @@ def summary_stream(task_id: str):
 
 
 # ---------- 前端静态托管（发布时生效；开发时由 Vite 自己提供页面） ----------
+# SEO 路由（robots/sitemap）必须注册在下方 catch-all 之前，否则会被吞掉
+app.include_router(seo.router)
+
 FRONTEND_DIST = Path(__file__).resolve().parent.parent / "static"
 if FRONTEND_DIST.exists():
     app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="assets")
@@ -276,7 +279,9 @@ if FRONTEND_DIST.exists():
         target = FRONTEND_DIST / full_path
         if full_path and target.is_file():
             return FileResponse(target)
-        return FileResponse(FRONTEND_DIST / "index.html")
+        index = FRONTEND_DIST / "index.html"
+        # SEO 注入：爬虫读到含 meta/结构化数据/静态正文的完整 HTML；用户端 Vue 挂载后照常接管
+        return HTMLResponse(seo.inject(index.read_text(encoding="utf-8"), index.stat().st_mtime))
 
 
 @app.on_event("startup")
