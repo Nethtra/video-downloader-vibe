@@ -629,6 +629,7 @@ onBeforeUnmount(() => {
         极易下
       </a>
       <nav class="nav-links">
+        <a href="#showcase">{{ t('nav.ai') }}</a>
         <a href="#features">{{ t('nav.features') }}</a>
         <a href="#pricing">{{ t('nav.pricing') }}</a>
         <a href="#faq">{{ t('nav.faq') }}</a>
@@ -656,25 +657,42 @@ onBeforeUnmount(() => {
     </div>
   </header>
 
-  <!-- ===== Hero ===== -->
+  <!-- ===== Hero（深色渐变 + 玻璃输入卡 + 真实数据统计带） ===== -->
   <section id="hero" class="hero">
-    <div class="container">
-      <h1 class="hero-title">{{ t('hero.t1') }}<span class="grad">{{ t('hero.t2') }}</span></h1>
+    <div class="hero-bg" aria-hidden="true">
+      <span class="orb orb-a"></span>
+      <span class="orb orb-b"></span>
+      <span class="hero-grid"></span>
+    </div>
+    <div class="container hero-inner">
+      <span class="hero-pill">
+        <svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor" aria-hidden="true"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z"/></svg>
+        {{ t('hero.pill') }}
+      </span>
+      <h1 class="hero-title">{{ t('hero.t1') }}<span class="grad hero-grad">{{ t('hero.t2') }}</span></h1>
       <p class="hero-sub">{{ t('hero.sub') }}</p>
-      <div class="input-row">
-        <input
-          v-model="url"
-          class="url-input"
-          type="text"
-          :placeholder="t('hero.ph')"
-          @keyup.enter="analyze"
-        />
-        <button class="btn btn-lg" :disabled="!canSubmit" @click="analyze">
-          {{ analyzing ? t('hero.analyzing') : t('hero.analyze') }}
-        </button>
+      <div class="input-card">
+        <div class="input-row">
+          <input
+            v-model="url"
+            class="url-input"
+            type="text"
+            :placeholder="t('hero.ph')"
+            @keyup.enter="analyze"
+          />
+          <button class="btn btn-lg btn-orange" :disabled="!canSubmit" @click="analyze">
+            {{ analyzing ? t('hero.analyzing') : t('hero.analyze') }}
+          </button>
+        </div>
+        <p v-if="errorMsg" class="error-tip hero-error">{{ errorMsg }}</p>
+        <p class="hero-hint">{{ t('hero.hint') }}</p>
       </div>
-      <p v-if="errorMsg" class="error-tip">{{ errorMsg }}</p>
-      <p class="hero-hint">{{ t('hero.hint') }}</p>
+      <div class="hero-stats">
+        <div class="stat" v-for="i in 4" :key="i">
+          <b>{{ t('stats.v' + i) }}</b>
+          <span>{{ t('stats.p' + i) }}</span>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -862,6 +880,62 @@ onBeforeUnmount(() => {
     </div>
   </section>
 
+  <!-- ===== AI 总结效果展示 ===== -->
+  <section id="showcase" class="showcase">
+    <div class="container">
+      <h2 class="sec-title">{{ t('sc.t1') }}<span class="grad"> {{ t('sc.t2') }}</span></h2>
+      <p class="sec-sub">{{ t('sc.sub') }}</p>
+      <div class="showcase-grid">
+        <div class="sc-features">
+          <div class="sc-f" v-for="i in 4" :key="i">
+            <span class="sc-f-icon">
+              <svg v-if="i === 1" viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01"/></svg>
+              <svg v-else-if="i === 2" viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3z"/><path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9L19 15z"/></svg>
+              <svg v-else-if="i === 3" viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="5" cy="12" r="2.2"/><circle cx="19" cy="5.5" r="2.2"/><circle cx="19" cy="18.5" r="2.2"/><path d="M7.2 12h11.6M17.5 7.4L9 10.9M17.5 16.6L9 13.1"/></svg>
+              <svg v-else viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 14.5h6M7 14.5v0M15 14.5h2"/></svg>
+            </span>
+            <div>
+              <h4>{{ t('sc.f' + i + 't') }}</h4>
+              <p>{{ t('sc.f' + i + 'd') }}</p>
+            </div>
+          </div>
+        </div>
+        <div class="demo-card">
+          <div class="demo-head">
+            <span class="demo-thumb">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="#fff"><path d="M8 5.5v13l11-6.5-11-6.5z"/></svg>
+            </span>
+            <div class="demo-head-txt">
+              <span class="demo-tag">{{ t('sc.demo.tag') }}</span>
+              <b>{{ t('sc.demo.title') }}</b>
+            </div>
+          </div>
+          <p class="demo-ov">{{ t('sc.demo.ov') }}</p>
+          <ul class="demo-points">
+            <li>{{ t('sc.demo.p1') }}</li>
+            <li>{{ t('sc.demo.p2') }}</li>
+            <li>{{ t('sc.demo.p3') }}</li>
+          </ul>
+          <div class="demo-chapters">
+            <span class="demo-ch"><i>00:00</i>{{ t('sc.demo.c1') }}</span>
+            <span class="demo-ch"><i>08:30</i>{{ t('sc.demo.c2') }}</span>
+            <span class="demo-ch"><i>21:45</i>{{ t('sc.demo.c3') }}</span>
+          </div>
+          <div class="demo-chips">
+            <span class="demo-chip">
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="5" cy="12" r="2"/><circle cx="19" cy="5.5" r="2"/><circle cx="19" cy="18.5" r="2"/><path d="M7 12h10M17 7.2L9.5 10.7M17 16.8L9.5 13.3"/></svg>
+              {{ t('sc.demo.map') }}
+            </span>
+            <span class="demo-chip">
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 15h5M14 15h3"/></svg>
+              {{ t('sc.demo.srt') }}
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <!-- ===== 功能卖点 ===== -->
   <section id="features" class="features">
     <div class="container">
@@ -903,6 +977,26 @@ onBeforeUnmount(() => {
           <h4>{{ t('features.f6t') }}</h4>
           <p>{{ t('features.f6d') }}</p>
           <div class="tags"><span>{{ t('features.f6a') }}</span><span>{{ t('features.f6b') }}</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== 使用场景 ===== -->
+  <section id="scene" class="scene">
+    <div class="container">
+      <h2 class="sec-title">{{ t('scene.t1') }}<span class="grad"> {{ t('scene.t2') }}</span></h2>
+      <p class="sec-sub">{{ t('scene.sub') }}</p>
+      <div class="scene-grid">
+        <div class="scene-card" v-for="i in 4" :key="i">
+          <span class="scene-icon">
+            <svg v-if="i === 1" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 10L12 5 2 10l10 5 10-5z"/><path d="M6 12.3V17c0 1.2 2.7 2.8 6 2.8s6-1.6 6-2.8v-4.7"/></svg>
+            <svg v-else-if="i === 2" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v1a7 7 0 0014 0v-1M12 18v4"/></svg>
+            <svg v-else-if="i === 3" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2.5" y="7" width="19" height="13" rx="2"/><path d="M8.5 7V5a2 2 0 012-2h3a2 2 0 012 2v2M2.5 12.5h19"/></svg>
+            <svg v-else viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.5"/><path d="M10 8.5l6 3.5-6 3.5v-7z"/></svg>
+          </span>
+          <h4>{{ t('scene.c' + i + 't') }}</h4>
+          <p>{{ t('scene.c' + i + 'd') }}</p>
         </div>
       </div>
     </div>
@@ -970,6 +1064,23 @@ onBeforeUnmount(() => {
         <summary>{{ t('faq.q6') }}</summary>
         <p>{{ t('faq.a6') }}</p>
       </details>
+      <details class="faq-item">
+        <summary>{{ t('faq.q7') }}</summary>
+        <p>{{ t('faq.a7') }}</p>
+      </details>
+    </div>
+  </section>
+
+  <!-- ===== 底部 CTA ===== -->
+  <section class="cta-band">
+    <div class="hero-bg" aria-hidden="true">
+      <span class="orb orb-a"></span>
+      <span class="orb orb-b"></span>
+    </div>
+    <div class="container cta-inner">
+      <h2>{{ t('cta.t') }}</h2>
+      <p>{{ t('cta.sub') }}</p>
+      <a class="btn btn-lg btn-orange" href="#hero">{{ t('cta.btn') }}</a>
     </div>
   </section>
 
@@ -1166,10 +1277,6 @@ export default {
 .lang-select:hover { border-color: var(--primary); color: var(--primary); }
 .lang-select:focus { border-color: var(--primary); }
 
-/* ===== Hero ===== */
-.hero { padding: 52px 0 36px; text-align: center; }
-.hero-title { font-size: 36px; font-weight: 700; letter-spacing: 0.5px; }
-.hero-sub { color: var(--text-2); font-size: 15.5px; margin-top: 14px; }
 .input-row {
   display: flex;
   gap: 10px;
@@ -1185,14 +1292,190 @@ export default {
   font-size: 14px;
   outline: none;
   background: var(--bg-elevated);
+  color: var(--text);
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 .url-input:focus {
   border-color: var(--primary);
   box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.14);
 }
+
+/* ===== Hero（深色渐变，浅/深主题下均为深色锚点区） ===== */
+.hero {
+  position: relative;
+  overflow: hidden;
+  padding: 84px 0 60px;
+  text-align: center;
+  background: linear-gradient(168deg, #052e29 0%, #073b33 42%, #0a1a28 100%);
+}
+.hero-bg { position: absolute; inset: 0; pointer-events: none; }
+.orb { position: absolute; border-radius: 50%; filter: blur(90px); }
+.orb-a {
+  width: 430px; height: 430px; left: -130px; top: -150px; opacity: .55;
+  background: radial-gradient(circle, rgba(20, 184, 166, 0.6), transparent 70%);
+}
+.orb-b {
+  width: 400px; height: 400px; right: -110px; bottom: -190px; opacity: .45;
+  background: radial-gradient(circle, rgba(34, 211, 238, 0.45), transparent 70%);
+}
+.hero-grid {
+  position: absolute; inset: 0;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.045) 1px, transparent 1px);
+  background-size: 44px 44px;
+  -webkit-mask-image: radial-gradient(ellipse 90% 72% at 50% 28%, #000 25%, transparent 74%);
+  mask-image: radial-gradient(ellipse 90% 72% at 50% 28%, #000 25%, transparent 74%);
+}
+.hero-inner { position: relative; }
+.hero-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 14px; border-radius: 999px; margin-bottom: 20px;
+  background: rgba(20, 184, 166, 0.13); border: 1px solid rgba(45, 212, 191, 0.38);
+  color: #99f6e4; font-size: 12.5px;
+}
+.hero-title { color: #fff; font-size: 40px; font-weight: 700; letter-spacing: 0.5px; }
+.hero-grad {
+  background: linear-gradient(90deg, #5eead4, #22d3ee 55%, #2dd4bf);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.hero .hero-sub {
+  color: rgba(226, 254, 250, 0.82); font-size: 15.5px;
+  max-width: 620px; margin: 14px auto 0;
+}
+.input-card {
+  max-width: 680px; margin: 26px auto 0; padding: 18px 18px 12px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.055);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: 0 18px 50px rgba(2, 20, 18, 0.35);
+}
+.hero .input-row { margin: 0 auto; }
+.hero .url-input {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.18);
+  color: #fff;
+}
+.hero .url-input::placeholder { color: rgba(255, 255, 255, 0.42); }
+.hero .url-input:focus {
+  border-color: #2dd4bf;
+  box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.22);
+}
+.hero-error { color: #fecaca; }
+.hero .hero-hint { color: rgba(153, 246, 228, 0.55); }
+.hero-stats {
+  display: flex; justify-content: center; align-items: flex-start;
+  gap: clamp(24px, 6vw, 64px); margin-top: 36px; flex-wrap: wrap;
+}
+.stat b { display: block; font-size: 24px; font-weight: 700; color: #fff; letter-spacing: 0.3px; }
+.stat span { display: block; margin-top: 3px; font-size: 12.5px; color: rgba(153, 246, 228, 0.72); }
 .error-tip { color: var(--danger); margin-top: 12px; font-size: 13.5px; }
 .hero-hint { color: var(--text-3); font-size: 12.5px; margin-top: 14px; }
+
+/* ===== 橙色行动按钮（CTA 专用） ===== */
+.btn-orange { background: #ea580c; }
+.btn-orange:hover { background: #c2410c; }
+
+/* ===== AI 总结效果展示 ===== */
+.showcase { padding: 84px 0 72px; }
+.showcase-grid {
+  display: grid; grid-template-columns: 1fr 1.08fr;
+  gap: 52px; align-items: center; margin-top: 42px;
+}
+.sc-f { display: flex; gap: 14px; padding: 15px 0; }
+.sc-f + .sc-f { border-top: 1px dashed var(--border); }
+.sc-f-icon {
+  flex: none; width: 38px; height: 38px; border-radius: 10px;
+  background: rgba(13, 148, 136, 0.1); color: var(--primary);
+  display: flex; align-items: center; justify-content: center;
+}
+.sc-f h4 { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+.sc-f p { font-size: 13px; color: var(--text-2); line-height: 1.65; }
+.demo-card {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 18px; padding: 18px;
+  box-shadow: 0 16px 40px rgba(13, 148, 136, 0.1);
+}
+.demo-head { display: flex; gap: 12px; align-items: center; }
+.demo-thumb {
+  flex: none; width: 76px; height: 48px; border-radius: 9px;
+  background: linear-gradient(135deg, #0d9488, #115e59);
+  display: flex; align-items: center; justify-content: center;
+}
+.demo-tag {
+  display: inline-block; font-size: 10.5px; font-weight: 600;
+  color: var(--primary); background: rgba(13, 148, 136, 0.1);
+  padding: 2px 8px; border-radius: 999px;
+}
+.demo-head-txt b { display: block; font-size: 14px; margin-top: 5px; }
+.demo-ov {
+  font-size: 13px; color: var(--text-2); line-height: 1.65;
+  margin: 14px 0; padding: 10px 12px;
+  background: rgba(13, 148, 136, 0.06);
+  border-left: 3px solid var(--primary); border-radius: 8px;
+}
+.demo-points { list-style: none; margin: 0 0 12px; }
+.demo-points li {
+  font-size: 13px; color: var(--text); line-height: 1.6;
+  padding: 4px 0 4px 20px; position: relative;
+}
+.demo-points li::before {
+  content: '✓'; position: absolute; left: 2px; top: 4px;
+  color: var(--primary); font-weight: 600;
+}
+.demo-chapters { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+.demo-ch {
+  font-size: 12.5px; color: var(--text-2);
+  padding: 7px 11px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--bg-elevated);
+}
+.demo-ch i {
+  font-style: normal; color: var(--primary); font-weight: 600;
+  margin-right: 8px; font-variant-numeric: tabular-nums;
+}
+.demo-chips { display: flex; gap: 8px; flex-wrap: wrap; }
+.demo-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11.5px; color: var(--text-2);
+  padding: 5px 11px; border: 1px solid var(--border); border-radius: 999px;
+}
+
+/* ===== 使用场景 ===== */
+.scene { padding: 72px 0 80px; background: var(--bg-secondary, transparent); }
+.scene-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  gap: 14px; margin-top: 40px;
+}
+.scene-card {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 14px; padding: 22px 18px;
+  transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s;
+}
+.scene-card:hover {
+  transform: translateY(-3px);
+  border-color: rgba(13, 148, 136, 0.45);
+  box-shadow: 0 12px 32px rgba(13, 148, 136, 0.13);
+}
+.scene-icon {
+  width: 42px; height: 42px; border-radius: 12px; margin-bottom: 13px;
+  background: linear-gradient(135deg, rgba(13, 148, 136, 0.16), rgba(20, 184, 166, 0.07));
+  color: var(--primary);
+  display: flex; align-items: center; justify-content: center;
+}
+.scene-card h4 { font-size: 15px; font-weight: 600; margin-bottom: 7px; }
+.scene-card p { font-size: 12.5px; color: var(--text-2); line-height: 1.68; }
+
+/* ===== 底部 CTA ===== */
+.cta-band {
+  position: relative; overflow: hidden; text-align: center;
+  padding: 72px 0;
+  background: linear-gradient(168deg, #052e29 0%, #073b33 46%, #0a1a28 100%);
+}
+.cta-inner { position: relative; }
+.cta-band h2 { color: #fff; font-size: 28px; font-weight: 700; }
+.cta-band p { color: rgba(226, 254, 250, 0.75); margin: 12px 0 26px; font-size: 14.5px; }
 
 /* ===== 解析结果（双栏工作台） ===== */
 .result { padding: 6px 0 28px; }
@@ -1681,6 +1964,9 @@ export default {
 /* ===== 响应式 ===== */
 @media (max-width: 900px) {
   .hero-title { font-size: 30px; }
+  .hero { padding: 64px 0 48px; }
+  .showcase-grid { grid-template-columns: 1fr; gap: 30px; }
+  .scene-grid { grid-template-columns: repeat(2, 1fr); }
   .feature-grid { grid-template-columns: repeat(2, 1fr); }
   .plan-grid { grid-template-columns: 1fr; max-width: 400px; }
   .plan-card.highlight { order: -1; }
@@ -1690,10 +1976,15 @@ export default {
 }
 @media (max-width: 600px) {
   .nav-links { display: none; }
-  .hero { padding: 40px 0 30px; }
+  .hero { padding: 48px 0 40px; }
   .hero-title { font-size: 25px; }
   .hero-sub { font-size: 14px; }
   .input-row { flex-direction: column; }
+  .input-card { padding: 14px 14px 10px; }
+  .hero-stats { gap: 20px 28px; margin-top: 28px; }
+  .stat b { font-size: 19px; }
+  .scene-grid { grid-template-columns: 1fr; }
+  .cta-band h2 { font-size: 21px; }
   .btn-lg { width: 100%; }
   .feature-grid { grid-template-columns: 1fr; }
   .done-row { flex-direction: column; align-items: stretch; text-align: center; }
