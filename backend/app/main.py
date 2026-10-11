@@ -328,11 +328,18 @@ def summary_stream(task_id: str):
 
         # ---- 阶段 2：搬运 LLM 增量（后台线程生产，这里消费）----
         sent = 0
-        deadline = time.time() + 300
+        idle = 0.0
+        deadline = time.time() + 900  # 长视频走分块摘要（多轮 LLM 调用），预留 15 分钟
         while time.time() < deadline:
             text, sent = summarizer.get_stream_chunk(task_id, sent)
             if text:
                 yield _sse("delta", {"t": text})
+                idle = 0.0
+            else:
+                idle += 0.2
+                if idle >= 10:  # 分块摘要期间两次增量间隔可达数十秒，注释行保活
+                    yield ": keepalive\n\n"
+                    idle = 0.0
             task = summarizer.get_task(task_id)
             if not task:
                 yield _sse("error", {"error": "总结任务不存在或已过期"})
