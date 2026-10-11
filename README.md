@@ -32,20 +32,17 @@
 
 ## 平台支持现状（实测）
 
-| 平台 | 本地部署 | 云沙箱部署（WorkBuddy 发布） | 说明 |
-|------|:---:|:---:|------|
-| 抖音 | ✅ | ✅ | 自研免 Cookie 通道，无水印，支持口令/短链/精选页链接 |
-| B站 | ✅ 字幕/总结全可用 | ⚠️ 下载解析被 412 风控；AI 总结 ✅（dm/view 免风控兜底） | 云沙箱 IP 级风控，本地/VPS 部署不受影响 |
-| YouTube | ✅ 普通视频字幕/总结可用 | ❌ 沙箱缺 JS 运行时 + 出口受限 | 解析已异步化；字幕自动选最优语言 |
-| 其它 yt-dlp 平台 | ✅ | ⚠️ 视平台风控而定 | 云端 IP 信誉不如家宽/自有服务器 |
+| 平台 | 本地部署 | 说明 |
+|------|:---:|------|
+| 抖音 | ✅ | 自研免 Cookie 通道，无水印，支持口令/短链/精选页链接 |
+| B站 | ✅ 字幕/总结全可用 | 本地/VPS 部署不受影响 |
+| YouTube | ✅ 普通视频字幕/总结可用 | 解析已异步化；字幕自动选最优语言 |
+| 其它 yt-dlp 平台 | ✅ | 云端 IP 信誉不如家宽/自有服务器 |
 
 > YouTube 依赖新版 yt-dlp 的 JS 运行时（自动检测部署机上的 node **并按版本取最高**，多 node
 > 共存时低版本会导致签名求解静默失败）与可达的网络出口。代理解析顺序：`backend/proxy.txt`
 > 显式指定 > Windows 注册表系统代理（自动读取，启动时清除环境变量注入的干扰）。国内直连
-> YouTube 不稳定。**年龄限制视频**需在 `backend/cookies/cookies.txt` 配置已登录且通过年龄
-> 验证的账号 Cookie（带 Cookie 定向重试，普通视频不受影响）。
 
-> 云沙箱的局限是平台侧网络环境所致，代码与本地完全一致。需要完整多平台能力时，
 > 将本项目部署到国内 VPS 即可（代码零改动）。
 
 ## 目录结构
@@ -116,8 +113,8 @@ cd backend
 cp .env.example .env    # 然后编辑 .env 填入 LLM_API_KEY
 ```
 
-- DeepSeek：`LLM_BASE_URL=https://api.deepseek.com`、`LLM_MODEL=deepseek-chat`
-- 智谱 GLM：`LLM_BASE_URL=https://open.bigmodel.cn/api/paas/v4`、`LLM_MODEL=glm-4-flash`
+- DeepSeek：`LLM_BASE_URL=https://api.deepseek.com`、`LLM_MODEL=`
+- 智谱 GLM：`LLM_BASE_URL=https://open.bigmodel.cn/api/paas/v4`、`LLM_MODEL=`
 - `AI_DAILY_LIMIT=3`：免费 IP 每日总结次数
 - 未配置 key 时接口返回「AI 总结功能正在开通中」，不影响下载功能
 - `LLM_PROVIDER=mock` 仅限本地前端联调（返回固定模拟数据），上线前必须去掉
@@ -132,7 +129,6 @@ cp .env.example .env    # 然后编辑 .env 填入 LLM_API_KEY
 - 结果中的「字幕时间线」选项卡保留全量带时间戳字幕，并提供 **SRT / TXT 下载**
 - 喂给 LLM 的字幕素材每行带 `[分:秒]` 时间戳，章节大纲的时间为素材真实时间（非估算）
 
-> YouTube 年龄限制视频例外：需在 `backend/cookies/cookies.txt` 配置已登录且通过年龄
 > 验证的账号 Cookie（见上方 Cookie 维护），配置后自动带 Cookie 定向重试。
 
 ## 支付与会员（Stripe 已接入）
@@ -148,8 +144,7 @@ cp .env.example .env    # 然后编辑 .env 填入 LLM_API_KEY
 ## 已知限制
 
 - 抖音图集/图文内容暂不支持（明确报错）
-- AI 总结：YouTube 年龄限制视频需 cookies.txt 配置已登录账号；抖音等无字幕平台走降级总结（基于标题/简介/热门评论）；YouTube 字幕接口高频使用会临时 429（自动重试+降级）；总结结果与字幕时间线 30 分钟后自动清理
-- 云沙箱部署时 B站/YouTube 等受平台网络环境限制（见上方平台支持现状表）
+- AI 总结：抖音等无字幕平台走降级总结（基于标题/简介/热门评论）；YouTube 字幕接口高频使用会临时 429（自动重试+降级）；总结结果与字幕时间线 30 分钟后自动清理
 - 下载文件 30 分钟后自动清理，请及时保存
 
 ## 免责声明
