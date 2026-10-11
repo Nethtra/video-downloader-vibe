@@ -51,14 +51,18 @@ _load_env()
 
 LLM_API_KEY = os.getenv("LLM_API_KEY", "")
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://api.deepseek.com").rstrip("/")
-LLM_MODEL = os.getenv("LLM_MODEL", "deepseek-chat")
+LLM_MODEL = os.getenv("LLM_MODEL", "deepseek-flash")  # DeepSeek-V4.1-Flash，1M 上下文
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "")  # "mock" 仅本地联调用
 AI_DAILY_LIMIT = int(os.getenv("AI_DAILY_LIMIT", "3"))
 
 SUMMARY_TTL = 30 * 60        # 总结结果保留 30 分钟，与下载文件 TTL 一致
-MAX_SUBTITLE_CHARS = 16000   # 字幕文本预算（约 10k token，保证长视频总结素材充足）
-MAX_TRANSCRIPT_ITEMS = 400   # 字幕时间线最多保留条数
-LLM_TIMEOUT = 90
+MAX_TRANSCRIPT_ITEMS = 12000 # 字幕时间线保留条数（全量保留：前端时间线/SRT下载/总结素材共用，
+                             # 12000 条约可覆盖 10 小时以上的视频，此前 400 条导致长视频在 15 分钟处截断）
+MAX_MATERIAL_CHARS = 48000   # 单次 LLM 调用的字幕素材字符预算（约 30k token，DeepSeek 64k 上下文内安全）
+MAP_CHUNK_CHARS = 20000      # 超出单次预算时走「分块摘要」：每块字幕的字符数（约 30~40 分钟内容，
+                             # 块太大时 LLM 只摘开头几十条就收工，块内覆盖不足）
+MAX_MAP_CHUNKS = 20          # 分块数上限（超出部分并入末块，避免长尾内容被静默丢弃）
+LLM_TIMEOUT = 240  # deepseek-flash 默认思考模式，长输入响应变慢，放宽超时
 MIN_SUBTITLE_LEN = 50        # 字幕太短视为无效，走降级
 
 # 有 key 或显式 mock 模式才可用
@@ -69,6 +73,15 @@ _direct_opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 # 字幕 CDN 可能是国内（B站）也可能是国外（YouTube），先走默认网络栈
 # （系统代理开启时国外可通），失败再退直连兜底。
 _default_opener = urllib.request.build_opener()
+
+_IS_DEEPSEEK = "deepseek" in LLM_BASE_URL.lower()
+
+
+def _thinking_off() -> dict:
+    """DeepSeek 专有参数：关闭思考模式（V4.1 系列默认开启思考、effort=high，
+    机械的字幕要点提取用它太慢；仅对官方 API 注入，其它兼容服务不认识的
+    参数可能导致 400）。"""
+    return {"thinking": {"type": "disabled"}} if _IS_DEEPSEEK else {}
 
 _BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
@@ -136,7 +149,7 @@ class OpenAICompatProvider(LLMProvider):
     def chat_json(self, system: str, user: str) -> str:
         last_err = None
         for attempt in range(2):  # 网络异常/5xx 重试 1 次
-            req = self._build_request(system, user, use_json_mode=True)
+            req = self._build_request(system, user, use_json_mode=True, thinking_off=True)
             try:
                 with _direct_opener.open(req, timeout=LLM_TIMEOUT) as r:
                     data = json.loads(r.read().decode("utf-8", "ignore"))
@@ -149,7 +162,7 @@ class OpenAICompatProvider(LLMProvider):
                     pass
                 if e.code < 500:
                     if "response_format" in str(body) or e.code == 400:
-                        req = self._build_request(system, user, use_json_mode=False)
+                        req = self._build_request(system, user, use_json_mode=False, thinking_off=True)
                         try:
                             with _direct_opener.open(req, timeout=LLM_TIMEOUT) as r:
                                 data = json.loads(r.read().decode("utf-8", "ignore"))
@@ -164,7 +177,8 @@ class OpenAICompatProvider(LLMProvider):
                 time.sleep(2)
         raise RuntimeError("AI 服务暂时不可用，请稍后重试")
 
-    def _build_request(self, system: str, user: str, use_json_mode: bool):
+    def _build_request(self, system: str, user: str, use_json_mode: bool,
+                       thinking_off: bool = False):
         body = {
             "model": LLM_MODEL,
             "temperature": 0.3,
@@ -173,6 +187,8 @@ class OpenAICompatProvider(LLMProvider):
                 {"role": "user", "content": user},
             ],
         }
+        if thinking_off:
+            body.update(_thinking_off())
         if use_json_mode:
             body["response_format"] = {"type": "json_object"}
         return urllib.request.Request(
@@ -254,6 +270,19 @@ SYSTEM_PROMPT = """你是视频内容总结助手。根据给定的素材（视�
 4. 思维导图必须是合法 JSON，最多 3 层、每层最多 5 个节点；
 5. 素材只是视频基本信息（无字幕）时：概述与要点必须基于素材如实概括，不得编造视频内容；
 6. 字幕被截断时只总结已有部分，不要猜测截断之后的内容。"""
+
+
+# 长视频分块摘要（map 阶段）的提示词：每块提取带真实时间戳的要点
+MAP_PROMPT = """你是视频字幕分段摘要助手。下面是一个长视频的第 {idx}/{total} 段字幕（每行行首的[分:秒]是该句开始时间），
+本段约 {minutes} 分钟内容，请均匀提取整段的 {n} 条左右要点，输出 JSON（不要输出任何其它内容）：
+{{"items": [{{"t": "分:秒", "cap": "10字以内小标题", "point": "要点内容"}}], "seg_summary": "用2~3句话概括本段整体讲了什么（作为该时间段的章节说明，包含本段的核心结论与关键细节）"}}
+
+要求：
+1. 核心观点、结论、关键数字、专有名词、方法论、有趣的细节都要覆盖；
+2. 每条 point 40~120 字，保留具体信息，禁止"聊了很多内容"这类空话；cap 是该要点的短标题（10 字以内）；
+3. 要点必须均匀分布在整个时间段：从本段开头到结尾都要有，禁止只摘前几分钟；
+4. t 必须取该要点对应句子的真实时间戳，禁止估算；
+5. 忽略寒暄、口播水话与重复内容。"""
 
 
 # ---------- 字幕提取（保留时间线） ----------
@@ -404,12 +433,6 @@ def _parse_caption(raw: str, ext: str) -> tuple[str, list]:
     return text, transcript
 
 
-def _truncate(text: str, limit: int = MAX_SUBTITLE_CHARS) -> str:
-    if len(text) <= limit:
-        return text
-    return text[:limit] + "\n（字幕过长已截断，请仅总结以上内容）"
-
-
 def _fmt_ts(sec: int) -> str:
     """秒 → 分:秒（章节时间戳与素材标注统一格式）。"""
     m, s = divmod(max(0, int(sec)), 60)
@@ -419,6 +442,25 @@ def _fmt_ts(sec: int) -> str:
 def _timed_text(transcript: list) -> str:
     """把时间线渲染为带 [分:秒] 前缀的素材文本，让 LLM 的章节时间有真实依据。"""
     return "\n".join(f"[{_fmt_ts(item['time'])}] {item['text']}" for item in transcript)
+
+
+def _chunk_transcript(transcript: list, budget: int = MAP_CHUNK_CHARS) -> list:
+    """把时间线按字符预算切块（保持时间顺序），用于长视频分块摘要。
+    超出 MAX_MAP_CHUNKS 块时，把剩余内容并入末块（宁可末块略大，也不丢内容）。"""
+    chunks, cur, size = [], [], 0
+    for item in transcript:
+        line_len = len(item.get("text") or "") + 10  # 含时间戳前缀的估算宽度
+        if cur and size + line_len > budget:
+            chunks.append(cur)
+            cur, size = [], 0
+        cur.append(item)
+        size += line_len
+    if cur:
+        chunks.append(cur)
+    if len(chunks) > MAX_MAP_CHUNKS:
+        head, tail = chunks[:MAX_MAP_CHUNKS - 1], chunks[MAX_MAP_CHUNKS - 1:]
+        chunks = head + [[it for c in tail for it in c]]
+    return chunks
 
 
 # ---------- B站字幕通道（dm/view 弹幕池接口，无需登录、无需签名、无需 Cookie） ----------
@@ -534,7 +576,7 @@ def fetch_bili_subtitles(url: str) -> tuple[str, list] | None:
                 continue
             text, transcript = _bili_download_subtitle(s["subtitle_url"], referer)
             if text.strip():
-                return _truncate(text.strip()), transcript
+                return text.strip(), transcript
         return None
     except Exception:
         return None
@@ -558,11 +600,9 @@ def fetch_bili_full(url: str) -> tuple | None:
             "duration": None,
             "platform": "BiliBili",
         }
-        material = f"平台：BiliBili\n标题：{meta['title']}\n（元数据接口暂不可用，仅基于字幕总结）"
+        material = f"视频标题：{meta['title']}\n（元数据接口暂不可用，仅基于字幕总结）"
         subs = fetch_bili_subtitles(url)
         if subs and len(subs[0]) > MIN_SUBTITLE_LEN:
-            material += (f"\n视频字幕内容（每行行首的[分:秒]是该句开始时间）：\n"
-                         f"{_truncate(_timed_text(subs[1]))}")
             return material, "subtitles", meta, subs[1]
         return material, "meta", meta, []
     except Exception:
@@ -674,19 +714,16 @@ def _build_material(url: str) -> tuple[str, str, dict, list]:
         text, transcript = "", []
 
     if text and len(text.strip()) > MIN_SUBTITLE_LEN:
-        # 素材带 [分:秒] 时间戳：章节大纲的时间才能取真实值（否则 LLM 只能按比例瞎猜）
-        material = (f"视频标题：{meta['title'] or ''}\n"
-                    f"视频字幕内容（每行行首的[分:秒]是该句开始时间）：\n"
-                    f"{_truncate(_timed_text(transcript))}")
+        # 素材正文在 _run_llm 里按预算组装（短视频单次直读，长视频分块摘要），
+        # 这里只存标题头；transcript 已是全量时间线
+        material = f"视频标题：{meta['title'] or ''}\n"
         return material, "subtitles", meta, transcript
 
     # B站：yt-dlp 拿不到时走自研 dm/view 通道（免登录免 Cookie）
     if meta["platform"] == "BiliBili":
         bili = fetch_bili_subtitles(url)
         if bili and len(bili[0]) > MIN_SUBTITLE_LEN:
-            material = (f"视频标题：{meta['title'] or ''}\n"
-                        f"视频字幕内容（每行行首的[分:秒]是该句开始时间）：\n"
-                        f"{_truncate(_timed_text(bili[1]))}")
+            material = f"视频标题：{meta['title'] or ''}\n"
             return material, "subtitles", meta, bili[1]
 
     # 降级：标题+UP主+时长+简介（B站再补热门评论，改善降级总结质量）
@@ -883,27 +920,146 @@ def _prepare_material(task_id: str, url: str):
             _summaries[task_id].update(status="error", error=str(e)[:300])
 
 
-def _run_llm(task_id: str):
-    """阶段 2（后台线程）：流式调 LLM，增量写入 stream_buf；
-    即使前端断开 SSE，任务也会在后台完成并存库。"""
+def _push_delta(task_id: str, delta: str):
     with _lock:
-        task = _summaries.get(task_id)
-        material = task.get("material") if task else None
-    if not material:
-        with _lock:
-            _summaries[task_id].update(status="error", error="素材缺失")
-        return
+        if task_id in _summaries:
+            _summaries[task_id]["stream_buf"].append(delta)
+
+
+def _stream_to_buf(task_id: str, system: str, user: str):
+    """流式调 LLM，增量写入 stream_buf 并解析最终结果。
+    返回 (ok, result)；失败时已置任务 error，成功时由调用方收尾置 done
+    （调用方可能要对 result 做后处理，如长视频章节补齐）。"""
     raw_parts = []
     try:
-        for delta in provider.chat_stream(SYSTEM_PROMPT, f"视频素材：\n{material}"):
+        for delta in provider.chat_stream(system, user):
             raw_parts.append(delta)
-            with _lock:
-                if task_id in _summaries:
-                    _summaries[task_id]["stream_buf"].append(delta)
+            _push_delta(task_id, delta)
         raw = "".join(raw_parts)
-        result = _parse_llm_output(raw)
+        return True, _parse_llm_output(raw)
+    except Exception as e:
+        with _lock:
+            _summaries[task_id].update(status="error", error=str(e)[:300])
+        return False, None
+
+
+def _map_chunk(idx: int, total: int, chunk: list) -> tuple:
+    """map 阶段：对单块字幕提取带时间戳的要点（JSON 结构化）+ 本段小结。
+    要点数按块时长动态计算（约每 3 分钟 1 条），保证块内全程覆盖。
+    返回 (items, seg_summary)；单块失败时降级为均匀抽样原句，
+    seg_summary 置空（补章节时退化为用锚点要点当详情），保证该段时间覆盖不丢失。"""
+    timed = "\n".join(f"[{_fmt_ts(item['time'])}] {item['text']}" for item in chunk)
+    minutes = max(1, (chunk[-1]["time"] - chunk[0]["time"]) // 60)
+    n_items = max(8, min(35, minutes // 3))
+    try:
+        raw = provider.chat_json(
+            MAP_PROMPT.format(idx=idx, total=total, minutes=minutes, n=n_items), timed)
+        start, end = raw.find("{"), raw.rfind("}")
+        if start != -1 and end > start:
+            obj = json.loads(raw[start:end + 1])
+            items = []
+            for it in (obj.get("items") or [])[:40]:
+                t = str(it.get("t") or "").strip()
+                p = str(it.get("point") or "").strip()
+                if t and p:
+                    items.append({"t": t.replace("：", ":"),
+                                  "cap": str(it.get("cap") or "").strip()[:20],
+                                  "point": p})
+            if items:
+                seg_summary = str(obj.get("seg_summary") or "").strip()[:300]
+                return items, seg_summary
+    except Exception:
+        pass
+    step = max(1, len(chunk) // n_items)
+    return [{"t": _fmt_ts(it["time"]), "cap": "", "point": it["text"][:120]}
+            for it in chunk[::step]], ""
+
+
+def _supplement_chapters(result: dict, segments: list):
+    """章节覆盖兜底：LLM 倾向把章节集中在视频开头（实测 262 分钟视频
+    只给前 90 分钟出章节），这里检查每个时间段是否有章节命中，
+    漏掉的段用该段 map 结果补一个章节：标题取锚点要点短标题，
+    详情取该段小结（seg_summary），与 LLM 自产章节格式一致。"""
+    covered = result.get("chapters") or []
+    for seg_start, seg_end, items, seg_summary in segments:
+        if any(seg_start - 90 <= c["time"] <= seg_end for c in covered):
+            continue
+        if not items:
+            continue
+        it = items[len(items) // 4]  # 取该段约 1/4 处的要点做锚点，比首条更代表该段
+        t = _ts_str_to_sec(it["t"])
+        covered.append({"time": t, "label": it["t"],
+                        "title": (it.get("cap") or it["point"])[:40],
+                        "detail": (seg_summary or it["point"])[:300]})
+    covered.sort(key=lambda c: c["time"])
+    result["chapters"] = covered[:15]
+
+
+def _run_map_reduce(task_id: str, header: str, transcript: list, duration):
+    """长视频路径：字幕超出单次预算 → 分块提取要点 → 汇总做最终流式总结。
+    分块期间向 stream_buf 推进度行（markdown 引用块，解析时会被忽略）。"""
+    chunks = _chunk_transcript(transcript)
+    total = len(chunks)
+    segments = []   # [(start_sec, end_sec, map_items, seg_summary)]
+    for i, chunk in enumerate(chunks, 1):
+        _push_delta(task_id, f"\n> ⏳ 正在分段阅读字幕 {i}/{total}"
+                             f"（进行到第 {_fmt_ts(chunk[0]['time'])} 分钟附近）…\n\n")
+        items, seg_summary = _map_chunk(i, total, chunk)
+        segments.append((chunk[0]["time"], chunk[-1]["time"], items, seg_summary))
+    # reduce 素材按段分组：结构化呈现让 LLM 更容易按段覆盖
+    digest_parts = []
+    pos = 0
+    for i, (seg_start, seg_end, items, _seg_sum) in enumerate(segments, 1):
+        digest_parts.append(f"【第{i}段 {_fmt_ts(seg_start)}~{_fmt_ts(seg_end)}】")
+        for it in items:
+            digest_parts.append(f"[{it['t']}] {it['point']}")
+        pos += 1
+    digest = "\n".join(digest_parts)
+    dur_note = f"视频总时长：约 {int(duration) // 60} 分钟\n" if duration else ""
+    material = (f"{header}{dur_note}"
+                f"这是一个长视频，全部字幕已分段阅读完毕，共 {total} 段。"
+                f"以下是每段的内容要点（行首[分:秒]是该要点在视频中的时间）：\n{digest}\n\n"
+                f"注意：核心要点必须均匀覆盖每个段；"
+                f"章节大纲每个【第N段】至少 1 个章节，整体覆盖从开头到结尾，禁止集中在开头部分。")
+    ok, result = _stream_to_buf(task_id, SYSTEM_PROMPT, f"视频素材：\n{material}")
+    if ok and result:
+        _supplement_chapters(result, segments)
         with _lock:
             _summaries[task_id].update(status="done", result=result)
+
+
+def _run_llm(task_id: str):
+    """阶段 2（后台线程）：根据素材规模选择单次直读或分块摘要；
+    流式增量写入 stream_buf，即使前端断开 SSE，任务也会在后台完成。"""
+    with _lock:
+        task = _summaries.get(task_id)
+        if not task:
+            return
+        material = task.get("material")
+        basis = task.get("basis")
+        transcript = task.get("transcript") or []
+        title = task.get("title")
+        duration = task.get("duration")
+    try:
+        if basis == "subtitles" and transcript:
+            header = f"视频标题：{title or ''}\n"
+            timed = _timed_text(transcript)
+            if len(timed) <= MAX_MATERIAL_CHARS:
+                # 短/中视频：全量字幕一次直读（章节时间取真实时间戳）
+                ok, result = _stream_to_buf(task_id, SYSTEM_PROMPT,
+                                            f"视频素材：\n{header}"
+                                            f"视频字幕内容（每行行首的[分:秒]是该句开始时间）：\n{timed}")
+                if ok:
+                    with _lock:
+                        _summaries[task_id].update(status="done", result=result)
+            else:
+                # 长视频：分块摘要（map-reduce）
+                _run_map_reduce(task_id, header, transcript, duration)
+        else:
+            ok, result = _stream_to_buf(task_id, SYSTEM_PROMPT, f"视频素材：\n{material}")
+            if ok:
+                with _lock:
+                    _summaries[task_id].update(status="done", result=result)
     except Exception as e:
         with _lock:
             _summaries[task_id].update(status="error", error=str(e)[:300])
