@@ -448,7 +448,7 @@ function startPollFallback(taskId) {
   clearInterval(pollFallbackTimer)
   pollFallbackTimer = setInterval(async () => {
     pollElapsed += 2
-    if (pollElapsed > 120) {
+    if (pollElapsed > 600) {  // 长视频分块摘要可达数分钟，兜底轮询同步放宽
       clearInterval(pollFallbackTimer)
       summaryMsg.value = t('err.summaryTimeout')
       summaryTask.value = { ...(summaryTask.value || {}), status: 'error' }
@@ -637,7 +637,7 @@ onBeforeUnmount(() => {
       <select class="lang-select" v-model="locale" :aria-label="t('nav.lang')" @change="setLocale(locale)">
         <option v-for="l in LANGS" :key="l.value" :value="l.value">{{ l.label }}</option>
       </select>
-      <select class="lang-select" :value="theme" :aria-label="t('nav.theme')" @change="setTheme($event.target.value)">
+      <select class="lang-select theme-select" :value="theme" :aria-label="t('nav.theme')" @change="setTheme($event.target.value)">
         <option v-for="th in THEMES" :key="th" :value="th">{{ t('theme.' + th) }}</option>
       </select>
       <template v-if="user">
@@ -1976,6 +1976,12 @@ export default {
 }
 @media (max-width: 600px) {
   .nav-links { display: none; }
+  /* 移动端导航修复：空间不足时禁用 flex 收缩，防止 logo/按钮文字被压成竖排断字 */
+  .nav-inner { gap: 10px; }
+  .logo { flex-shrink: 0; white-space: nowrap; font-size: 16px; }
+  .theme-select { display: none; }          /* 主题切换为低频操作，小屏隐藏 */
+  .lang-select { max-width: 92px; }          /* 语言下拉缩窄，select 自动截断文本 */
+  .nav-inner .btn-sm { flex-shrink: 0; white-space: nowrap; padding: 7px 10px; font-size: 13px; }
   .hero { padding: 48px 0 40px; }
   .hero-title { font-size: 25px; }
   .hero-sub { font-size: 14px; }

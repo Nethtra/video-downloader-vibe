@@ -5,11 +5,13 @@
   robots 显式放行 AI 爬虫、llms.txt 提供 LLM 可读摘要（GEO）
 
 站点域名（部署相关）：
-- 当前默认值为 WorkBuddy 内置工具部署的临时域名
-- **自己部署时零代码改动**：在 backend/.env 加一行 `SITE_URL=https://你的域名`（与 LLM_API_KEY
-  同一个文件，同机制），或设置同名系统环境变量；canonical/OG/JSON-LD/robots/sitemap 全部自动跟随
-- 惰性解析（首次请求时读取并缓存）：因 main.py 中 seo 先于 summarizer 导入，
+- **零配置自适应**：未配置 SITE_URL 时，从当前请求动态推导（访问哪个域名/协议就输出哪个，
+  X-Forwarded-Proto/Host 头优先），因此沙箱、本地、自部署任何环境开箱即用，无硬编码默认域名
+- **显式配置仍推荐**（SEO 最佳实践：canonical 必须稳定）：backend/.env 加一行
+  `SITE_URL=https://你的域名`，或设置同名系统环境变量——显式值优先于动态推导
+- 惰性解析显式配置（进程内只读一次）：因 main.py 中 seo 先于 summarizer 导入，
   而 .env 由 summarizer 在导入时加载——import 时读 env 会拿不到 .env 的值
+- 注意：动态推导依赖反向代理传递 `Host` 与 `X-Forwarded-Proto` 头（宝塔默认会传）
 
 维护约定（重要）：
 - 页面文案（hero/features/FAQ）在 frontend/src/i18n.js 的 zh-CN 段调整时，
@@ -22,11 +24,10 @@ import re
 from datetime import date
 from pathlib import Path
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import Response
 
 # ---------- 单点配置 ----------
-_DEFAULT_SITE_URL = "https://yijixia-video-downloader.app.workbuddy.host"
 SITE_NAME = "极易下"
 PUBLISH_DATE = "2026-10-09"  # 站点首次上线日（datePublished 用，真实日期勿虚构）
 YTDLP_URL = "https://github.com/yt-dlp/yt-dlp"  # 引用来源（GEO：权威引用 +40%）
@@ -36,14 +37,16 @@ DESCRIPTION = ("粘贴链接即可免费下载 B站、抖音、YouTube、小红�
 KEYWORDS = ("视频下载,万能视频下载,视频下载工具,免费视频下载,B站视频下载,抖音视频下载,"
             "YouTube视频下载,小红书下载,无水印视频下载,视频转音频,AI视频总结")
 
-_site_url_cache = None
+_UNSET = object()          # 三态哨兵：区分「未解析过」和「解析过、结论是未配置」
+_explicit_url_cache = _UNSET
 
 
-def _site_url() -> str:
-    """惰性解析站点域名：环境变量 SITE_URL > backend/.env 的 SITE_URL > 默认（沙箱域名）。"""
-    global _site_url_cache
-    if _site_url_cache:
-        return _site_url_cache
+def _explicit_site_url() -> "str | None":
+    """显式配置（环境变量 SITE_URL > backend/.env 的 SITE_URL），进程内只解析一次。
+    未配置返回 None（结果也缓存，避免每个请求重复读文件）。"""
+    global _explicit_url_cache
+    if _explicit_url_cache is not _UNSET:
+        return _explicit_url_cache
     url = os.environ.get("SITE_URL")
     if not url:
         env_file = Path(__file__).resolve().parent.parent / ".env"
@@ -53,8 +56,23 @@ def _site_url() -> str:
                 if line.startswith("SITE_URL="):
                     url = line.split("=", 1)[1].strip().strip('"').strip("'")
                     break
-    _site_url_cache = (url or _DEFAULT_SITE_URL).rstrip("/")
-    return _site_url_cache
+    _explicit_url_cache = url.rstrip("/") if url else None
+    return _explicit_url_cache
+
+
+def _site_url(request: Request = None) -> "str | None":
+    """解析站点域名：显式配置优先；未配置时从当前请求动态推导（零硬编码默认值）。
+    动态推导按 X-Forwarded-Proto / Host 头（反向代理标准转发头）还原用户真实访问的
+    协议与域名。返回 None 表示完全无法确定，调用方应跳过依赖域名的 SEO 输出。"""
+    explicit = _explicit_site_url()
+    if explicit:
+        return explicit
+    if request is not None:
+        proto = request.headers.get("x-forwarded-proto") or request.url.scheme
+        host = request.headers.get("host") or request.url.netloc
+        if host:
+            return f"{proto}://{host}".rstrip("/")
+    return None
 
 # ---------- 与页面真实内容一致的文案（同步自 frontend/src/i18n.js zh-CN 段） ----------
 _HERO_TITLE = "全网视频下载，一键保存"
@@ -96,8 +114,8 @@ _DISCLAIMER = ("本工具基于开源项目 yt-dlp 构建，仅提供技术演�
 
 
 # ---------- JSON-LD 结构化数据 ----------
-def _jsonld() -> str:
-    u = _site_url()
+def _jsonld(u: "str | None") -> str:
+    u = u or "https://example.invalid"  # 防御分支：正常调用链必有域名（有请求即有 Host）
     graph = [
         {
             "@type": "WebSite",
@@ -165,31 +183,30 @@ def _jsonld() -> str:
     )
 
 
-# ---------- 注入内容（首站域名惰性解析，进程内只构建一次） ----------
-_head_cache = None
-
-
-def _head_tags() -> str:
-    global _head_cache
-    if _head_cache:
-        return _head_cache
-    u = _site_url()
-    _head_cache = f"""<meta name="keywords" content="{KEYWORDS}">
-    <link rel="canonical" href="{u}/">
-    <meta property="og:type" content="website">
-    <meta property="og:site_name" content="{SITE_NAME}">
-    <meta property="og:title" content="{TITLE}">
-    <meta property="og:description" content="{DESCRIPTION}">
-    <meta property="og:url" content="{u}/">
-    <meta property="og:image" content="{u}/og-image.png">
-    <meta property="og:image:width" content="1200">
-    <meta property="og:image:height" content="630">
-    <meta property="og:locale" content="zh_CN">
-    <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="{TITLE}">
-    <meta name="twitter:description" content="{DESCRIPTION}">
-    <meta name="twitter:image" content="{u}/og-image.png">
-    <style>
+# ---------- 注入内容（由 inject() 按构建结果统一缓存，此处不再独立缓存） ----------
+def _head_tags(u: "str | None") -> str:
+    lines = [f'<meta name="keywords" content="{KEYWORDS}">']
+    if u:
+        lines += [
+            f'<link rel="canonical" href="{u}/">',
+            f'<meta property="og:url" content="{u}/">',
+            f'<meta property="og:image" content="{u}/og-image.png">',
+        ]
+    lines += [
+        '<meta property="og:type" content="website">',
+        f'<meta property="og:site_name" content="{SITE_NAME}">',
+        f'<meta property="og:title" content="{TITLE}">',
+        f'<meta property="og:description" content="{DESCRIPTION}">',
+        '<meta property="og:image:width" content="1200">',
+        '<meta property="og:image:height" content="630">',
+        '<meta property="og:locale" content="zh_CN">',
+        '<meta name="twitter:card" content="summary_large_image">',
+        f'<meta name="twitter:title" content="{TITLE}">',
+        f'<meta name="twitter:description" content="{DESCRIPTION}">',
+    ]
+    if u:
+        lines.append(f'<meta name="twitter:image" content="{u}/og-image.png">')
+    lines.append(f"""<style>
       .seo-fallback{{max-width:1080px;margin:0 auto;padding:40px 20px;line-height:1.7}}
       .seo-fallback h1{{font-size:34px;margin:18px 0 10px;color:var(--text-1,#152523)}}
       .seo-fallback h2{{font-size:24px;margin:34px 0 12px;color:var(--text-1,#152523)}}
@@ -198,12 +215,12 @@ def _head_tags() -> str:
       .seo-fallback ol,.seo-fallback ul{{padding-left:22px}}
       .seo-fallback small{{color:var(--text-3,#6b8480)}}
     </style>
-    <script type="application/ld+json">{_jsonld()}</script>"""
-    return _head_cache
+    <script type="application/ld+json">{_jsonld(u)}</script>""")
+    return "\n    ".join(lines)
 
 
-def _body_html() -> str:
-    u = _site_url()
+def _body_html(u: "str | None") -> str:
+    host_disp = f"（{u.split('://', 1)[-1].rstrip('/')}）" if u else ""
     steps = "".join(f"<li><strong>{t}</strong>——{d}</li>" for t, d in _STEPS)
     feats = "".join(f"<h3>{t}</h3><p>{d}</p>" for t, d in _FEATURES)
     faqs = "".join(f"<h3>{q}</h3><p>{a}</p>" for q, a in _FAQ)
@@ -211,7 +228,7 @@ def _body_html() -> str:
     # 摘录信息密度高、一句话可独立成立的定义句；结尾附权威来源引用（GEO 研究：引用 +40%）
     return f"""<div class="seo-fallback">
       <h1>{_HERO_TITLE}</h1>
-      <p><strong>{SITE_NAME}</strong>（{u.replace("https://", "").rstrip("/")}）是一款免费在线万能视频下载工具：粘贴视频链接即可下载 B站、抖音、YouTube、小红书等 1000+ 平台的视频，支持最高 4K 原画画质与仅音频提取，并提供 AI 视频总结（概述、要点、章节时间线与思维导图）。无需注册登录，手机与电脑浏览器均可直接使用。技术底层为开源项目 yt-dlp（GitHub 社区持续维护）。</p>
+      <p><strong>{SITE_NAME}</strong>{host_disp}是一款免费在线万能视频下载工具：粘贴视频链接即可下载 B站、抖音、YouTube、小红书等 1000+ 平台的视频，支持最高 4K 原画画质与仅音频提取，并提供 AI 视频总结（概述、要点、章节时间线与思维导图）。无需注册登录，手机与电脑浏览器均可直接使用。技术底层为开源项目 yt-dlp（GitHub 社区持续维护）。</p>
       <p>{_HERO_SUB}</p>
       <h2>使用步骤</h2>
       <ol>{steps}</ol>
@@ -228,12 +245,15 @@ _TITLE_RE = re.compile(r"<title>.*?</title>", re.IGNORECASE | re.DOTALL)
 _DESC_RE = re.compile(r'<meta\s+name="description"\s+content="[^"]*"\s*/?>', re.IGNORECASE)
 _APP_RE = re.compile(r'(<div id="app">)\s*(</div>)')
 
-_cache = {"mtime": None, "html": ""}
+_cache = {"key": None, "html": ""}
 
 
-def inject(raw_html: str, mtime: float) -> str:
-    """把 SEO meta 与静态正文注入 index.html 文本（按 mtime 缓存，仅生产路径调用）。"""
-    if _cache["mtime"] == mtime and _cache["html"]:
+def inject(raw_html: str, mtime: float, request: Request = None) -> str:
+    """把 SEO meta 与静态正文注入 index.html 文本。
+    缓存键 = (文件 mtime, 站点域名)：显式配置时域名恒定；动态推导时不同域名各自缓存。"""
+    u = _site_url(request)
+    key = (mtime, u)
+    if _cache["key"] == key and _cache["html"]:
         return _cache["html"]
     html = _TITLE_RE.sub(lambda m: f"<title>{TITLE}</title>", raw_html, count=1)
     new_desc = f'<meta name="description" content="{DESCRIPTION}">'
@@ -241,15 +261,15 @@ def inject(raw_html: str, mtime: float) -> str:
         html = _DESC_RE.sub(lambda m: new_desc, html, count=1)
     else:
         html = html.replace("</head>", f"    {new_desc}\n</head>", 1)
-    html = html.replace("</head>", _head_tags() + "</head>", 1)
-    body = _body_html()
+    html = html.replace("</head>", _head_tags(u) + "</head>", 1)
+    body = _body_html(u)
     html = _APP_RE.sub(lambda m: m.group(1) + body + m.group(2), html, count=1)
-    _cache.update(mtime=mtime, html=html)
+    _cache.update(key=key, html=html)
     return html
 
 
 # ---------- robots.txt / sitemap.xml / llms.txt ----------
-def _robots_txt() -> str:
+def _robots_txt(u: "str | None") -> str:
     # 命名组各自独立生效（互不继承 * 的规则）：显式 Allow = GEO 基础信号。
     # 覆盖：OpenAI/Anthropic/Perplexity/Google/Bing(Copilot)/Brave(Claude 搜索源)/字节/苹果/Meta/Amazon/You
     ai_bots = ("GPTBot", "OAI-SearchBot", "ChatGPT-User", "ClaudeBot", "Claude-User",
@@ -258,23 +278,23 @@ def _robots_txt() -> str:
                "Bytespider", "meta-externalagent", "Amazonbot", "YouBot")
     groups = ["User-agent: *\nAllow: /\nDisallow: /api/\n"]
     groups += [f"User-agent: {b}\nAllow: /\n" for b in ai_bots]
-    groups.append(f"Sitemap: {_site_url()}/sitemap.xml\n")
+    if u:
+        groups.append(f"Sitemap: {u}/sitemap.xml\n")
     return "\n".join(groups)
 
 
-def _llms_txt() -> str:
+def _llms_txt(u: "str | None") -> str:
     """llms.txt 约定（llmstxt.org）：面向 LLM 的站点摘要，Markdown 结构。
     AI 搜索/助手（Perplexity、ChatGPT 浏览等）抓取后可直接引用本站信息。
     写法遵循 GEO 研究结论：answer-first + 权威引用 + 具体统计数字（引用提升最大）。"""
-    u = _site_url()
     faqs = "\n".join(f"### {q}\n{a}" for q, a in _FAQ)
     feats = "\n".join(f"- **{t}**：{d}" for t, d in _FEATURES)
+    entry = f"- [首页（工具入口）]({u}/)：粘贴视频链接 → 解析 → 选择清晰度 → 下载\n" if u else ""
     return f"""# {SITE_NAME}（JiYiXia）
 
 > {SITE_NAME}是一款免费在线万能视频下载工具：粘贴视频链接即可下载 B站、抖音、YouTube、小红书等 1000+ 平台的视频，支持最高 4K 原画画质与仅音频提取，并提供 AI 视频总结（概述、要点、章节时间线与思维导图）。无需注册登录，手机与电脑浏览器均可直接使用。底层引擎为开源项目 yt-dlp（GitHub 社区维护）。
 
-- [首页（工具入口）]({u}/)：粘贴视频链接 → 解析 → 选择清晰度 → 下载
-
+{entry}
 ## 关键数据
 
 - 支持 1000+ 视频平台（国内外主流平台全覆盖）
@@ -305,11 +325,13 @@ def _llms_txt() -> str:
 """
 
 
-def _sitemap_xml() -> str:
+def _sitemap_xml(u: "str | None") -> str:
+    # 正常调用链必有域名（路由带 Request）；防御分支用相对占位避免输出错误域名
+    loc = f"{u}/" if u else "/"
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
-    <loc>{_site_url()}/</loc>
+    <loc>{loc}</loc>
     <lastmod>{date.today().isoformat()}</lastmod>
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
@@ -322,18 +344,18 @@ router = APIRouter()
 
 
 @router.get("/robots.txt", include_in_schema=False)
-def robots():
-    return Response(_robots_txt(), media_type="text/plain",
+def robots(request: Request):
+    return Response(_robots_txt(_site_url(request)), media_type="text/plain",
                     headers={"Cache-Control": "public, max-age=3600"})
 
 
 @router.get("/sitemap.xml", include_in_schema=False)
-def sitemap():
-    return Response(_sitemap_xml(), media_type="application/xml",
+def sitemap(request: Request):
+    return Response(_sitemap_xml(_site_url(request)), media_type="application/xml",
                     headers={"Cache-Control": "public, max-age=3600"})
 
 
 @router.get("/llms.txt", include_in_schema=False)
-def llms_txt():
-    return Response(_llms_txt(), media_type="text/markdown; charset=utf-8",
+def llms_txt(request: Request):
+    return Response(_llms_txt(_site_url(request)), media_type="text/markdown; charset=utf-8",
                     headers={"Cache-Control": "public, max-age=3600"})

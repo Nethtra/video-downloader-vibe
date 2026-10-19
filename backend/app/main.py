@@ -372,13 +372,14 @@ if FRONTEND_DIST.exists():
     app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="assets")
 
     @app.get("/{full_path:path}")
-    def spa(full_path: str):
+    def spa(full_path: str, request: Request):
         target = FRONTEND_DIST / full_path
         if full_path and target.is_file():
             return FileResponse(target)
         index = FRONTEND_DIST / "index.html"
         # SEO 注入：爬虫读到含 meta/结构化数据/静态正文的完整 HTML；用户端 Vue 挂载后照常接管
-        return HTMLResponse(seo.inject(index.read_text(encoding="utf-8"), index.stat().st_mtime))
+        # 传入 request：未配置 SITE_URL 时按访问域名动态推导 canonical/OG/sitemap 等输出
+        return HTMLResponse(seo.inject(index.read_text(encoding="utf-8"), index.stat().st_mtime, request))
 
 
 @app.on_event("startup")

@@ -28,3 +28,7 @@ _tid.txt
 
 # 本地测试产物
 .test-downloads/
+backend/venv/
+frontend/node_modules/
+backend/data/
+backend/downloads/
