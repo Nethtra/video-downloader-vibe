@@ -1,9 +1,11 @@
-# 密钥与本地配置（勿提交）
+# 密钥与本地配置（永不提交）
 backend/.env
+backend/proxy.txt
 
 # Python
 __pycache__/
 *.pyc
+backend/venv/
 
 # Node / 前端
 node_modules/
@@ -12,23 +14,18 @@ frontend/dist/
 # 构建产物（npm run build 重新生成）
 backend/static/
 
-# 运行时产物与本地数据
+# 运行时数据（下载文件、Cookie、SQLite）
 backend/downloads/
 backend/cookies/
 backend/data/
-backend/proxy.txt
-.workbuddy/
-*.log
+.test-downloads/
 
-# 本地测试
+# 本地工具与编辑器
+.workbuddy/
 .playwright-cli/
 .tools/
 *.genie
 _tid.txt
 
-# 本地测试产物
-.test-downloads/
-backend/venv/
-frontend/node_modules/
-backend/data/
-backend/downloads/
+# 日志
+*.log
