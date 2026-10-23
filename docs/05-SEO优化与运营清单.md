@@ -1,7 +1,8 @@
-# 05 - SEO 优化与运营清单（2026-10-10）
+# 05 - SEO 优化与运营清单（2026-10-10 初版，2026-10-23 校对）
 
-> 本文档沉淀 SEO 审计结论、本次改动的技术方案、以及需要站长手工完成的搜索引擎提交步骤。
-> 前置文档：01-需求分析 / 02-方案设计 / 03-AI视频总结 / 04-功能扩展与前端改版。
+> 本文档沉淀 SEO 审计结论、技术方案与站长提交步骤。2026-10-23 校对项：SITE_URL 解析策略、
+> 当前域名与部署形态、og-image 视觉、bundle 体积、JSON-LD 节点清单。
+> 前置文档：01-需求分析 / 02-方案设计 / 03-AI视频总结 / 04-功能扩展与前端改版 / 11-前端瑞士风格改版。
 
 ## 1. 审计结论（改动前）
 
@@ -20,7 +21,7 @@
 **为什么选后端注入而不是构建时预渲染**：全站单页无路由，两者效果等价；后端注入不碰 vite 8 (rolldown) 构建链（预渲染插件兼容性有风险）、前端代码零改动。
 
 **原理**：FastAPI 的 SPA 兜底路由返回 index.html 前，把 SEO 信号注入进去——
-- `<head>`：替换/补全 title、description，追加 keywords、canonical、OG、Twitter Card、JSON-LD（`@graph`：WebSite + WebApplication + FAQPage）
+- `<head>`：替换/补全 title、description，追加 keywords、canonical、OG、Twitter Card、JSON-LD（`@graph`：WebSite + Organization + WebApplication + HowTo + FAQPage）
 - `<body>`：`<div id="app">` 内部填入与页面真实内容一致的静态正文（H1/步骤/功能/FAQ/免责声明）
 - **爬虫**（不执行 JS）：直接读到完整 meta + 正文
 - **真实用户**（执行 JS）：Vue 挂载后自动替换 `#app` 内的静态正文，交互零变化；JS 关闭时静态正文可读（优雅降级）
@@ -32,22 +33,20 @@
 |---|---|---|
 | `backend/app/seo.py` | 新增 | SITE_URL 单点配置、TITLE/DESCRIPTION/KEYWORDS、FAQ/功能文案（同步自 i18n.js zh-CN）、JSON-LD、inject() 注入函数（按 index.html mtime 缓存）、robots.txt / sitemap.xml 路由 |
 | `backend/app/main.py` | 微调 | `import seo`；`app.include_router(seo.router)`（必须在 catch-all 之前注册，否则被吞）；spa() 返回 `HTMLResponse(seo.inject(...))` |
-| `frontend/public/og-image.png` | 新增 | 1200×630 分享卡片图（teal 品牌风），vite build 自动拷贝到 static/ |
+| `frontend/public/og-image.png` | 新增 | 1200×630 分享卡片图（**2026-10-23 起为瑞士风格：纸白底 + 墨黑字 + 强调红**），vite build 自动拷贝到 static/ |
 | 前端源码 | **零改动** | — |
 
 **维护约定（重要）**：
-- **站点域名**：seo.py 惰性读取 `SITE_URL`（优先级：系统环境变量 > backend/.env > 默认沙箱域名）。
-  自己部署时**零代码改动**——在 `backend/.env` 加一行 `SITE_URL=https://你的域名`（与 LLM_API_KEY 同一个文件），
-  canonical/OG/Twitter/JSON-LD/robots.txt/sitemap.xml 全部自动跟随
+- **站点域名**：`SITE_URL` 惰性解析，优先级为
+  **系统环境变量 > `backend/.env` > 按请求动态推导（`X-Forwarded-Proto` / `Host`）> 无域名（跳过域名相关标签）**。
+  推荐在 `backend/.env` 显式写 `SITE_URL=https://你的域名`（canonical 稳定）；不写也能工作，但反向代理需正确传 Host/Proto。
+  实际域名由部署者自行填写，仓库不记录具体站点地址
 - 页面文案（hero/features/FAQ）在 `frontend/src/i18n.js` zh-CN 段调整时，`seo.py` 的对应常量需同步（两处内容必须一致，不一致有搜索降权风险）
 
 ## 4. 站长提交清单（需要你手工完成，代码解决不了）
 
-> ⚠️ **提交时机警告（2026-10-10 用户澄清后补充）**：`yijixia-video-downloader.app.workbuddy.host`
-> 是 WorkBuddy 内置工具自动部署的临时域名，**不是你自己的部署**，后续你计划自己部署。
-> 搜索引擎收录积累的权重挂在"提交时用的那个域名"上，换域名不会自动迁移——
-> **建议等你自己部署、正式域名定下来后再做站长提交**；workbuddy 链接仅当测试/预览环境用。
-> 如果已在临时域名上提交过收录，迁移时按 §4.1 处理。
+> ⚠️ **域名说明**：本项目已部署在自有云服务器（宝塔 + Let's Encrypt），实际域名由站长配置，仓库不记录。
+> 站长提交只对**最终使用的正式域名**做一次——更换域名后收录权重不会自动迁移，如已提交过按 §4.1 做地址变更。
 
 > 原理：搜索引擎不会主动来抓新站，需要在站长平台验证域名 + 提交 sitemap 主动推送。
 > 以下步骤里的域名以你自己部署的正式域名为准（记作 `https://你的域名/`）。
@@ -79,7 +78,8 @@
 ## 5. 后续方向（P2，本轮未做）
 
 - **分平台 SEO 落地页**：`/bilibili`、`/douyin`、`/youtube` 等静态可收录页面，直接承接"B站视频下载"这类高意图长尾词（可与后端注入同一套机制实现）。**建议与自部署一起排期**——落地页在正式域名上发布才有意义
-- **性能细节**：当前 JS/CSS 体积小（146KB/17KB），Core Web Vitals 大概率达标；上线后用 PageSpeed Insights 复测即可
+- **性能细节**：当前构建产物约 **JS 182KB（gzip 65KB）/ CSS 39KB（gzip 7KB）**，另加自托管字体 91KB（latin 子集，`font-display: swap`）；
+  Core Web Vitals 预期达标，正式域名上线后用 PageSpeed Insights 复测
 
 ## 6. GEO —— AI 搜索优化（2026-10-10 晚补充）
 
@@ -117,9 +117,10 @@
 **ChatGPT 新鲜度规则**：30 天内有更新的内容被引用率高 3.2 倍——sitemap lastmod 已按日动态生成；
 后续功能更新时记得同步 llms.txt 与定义段的事实（三处一致原则）。
 
-## 7. 深色模式（2026-10-10 晚，体验项，与 SEO 无关但同批交付）
+## 7. 深色模式（体验项，与 SEO 无关但同批交付）
 
-- **三态切换**：跟随系统（默认）/ 浅色 / 深色，导航栏下拉选择，localStorage('theme') 持久化；auto 模式监听 `prefers-color-scheme` 实时跟随
-- **实现**：`src/theme.js`（与 i18n.js 同款零依赖模式）+ style.css `html.dark` 变量覆盖（语义变量默认值=原硬编码值，浅色外观零变化）+ index.html 防闪烁内联脚本（Vue 挂载前设好初始类）
-- **适配范围**：全站表面（卡片/输入框/导航/弹窗/徽章/滚动条）+ MindMap 工具条与全屏遮罩；**canvas/SVG 导出物固定白底黑字不变**（下载文件不随主题）
-- 验证脚本：`.workbuddy/verify-theme.js`（playwright-core + 系统 Edge，五场景含解析回归），可复用于后续主题改动回归
+- **三态切换**：跟随系统（默认）/ 浅色 / 深色，导航栏下拉选择，`localStorage('theme')` 持久化；auto 模式实时跟随系统
+- **实现**：`src/theme.js` + `style.css` 的 `html.dark` 变量覆盖 + `index.html` 防闪烁内联脚本
+- **2026-10-23 改版后**：浅色 = 纸白 `#F4F1EA` / 墨黑；深色 = 黑纸 `#0D0D0D` / 米白，强调红统一 `#DA291C`（深色提亮为 `#E4392B`）
+- **适配范围**：全站表面 + MindMap；**PNG/SVG 导出物固定纸白底**，不随主题变化
+- 回归方式：Playwright（Edge）截图 + 计算样式断言；验证脚本为本地工具，未纳入仓库
