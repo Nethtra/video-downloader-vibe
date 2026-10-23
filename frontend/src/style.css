@@ -1,49 +1,103 @@
+/* ---- 自托管字体（OFL，仅拉丁子集；中文走系统字体回退） ---- */
+@font-face {
+  font-family: "Inter";
+  src: url("/fonts/inter-latin.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Instrument Serif";
+  src: url("/fonts/instrument-serif-latin.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Instrument Serif";
+  src: url("/fonts/instrument-serif-italic-latin.woff2") format("woff2");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* ==========================================================================
+   极易下 · 瑞士国际主义风格（Swiss Style / International Typographic Style）
+   --------------------------------------------------------------------------
+   规则
+   · 颜色只有三种：墨黑（ink）、纸白（paper）、强调红（#DA291C），全部平涂
+   · 字体只用 400 / 700 两个字重；标题极大、正文很小
+   · 零圆角、零阴影、零渐变、零模糊；分隔一律用 1px 细线
+   · 深色模式 = 黑纸版：黑底、米白字、同一个强调红
+   ========================================================================== */
+
 :root {
-  /* Teal 主色系（skill 设计系统推荐）+ 橙色 CTA 强调 */
-  --primary: #0d9488;
-  --primary-dark: #0f766e;
-  --primary-bg: #e6f5f2;
-  --accent: #ea580c;
-  --text-1: #152523;
-  --text-2: #556b67;
-  --text-3: #8aa09a;
-  --bg-page: #f4faf9;
-  --bg-card: #ffffff;
-  --bg-elevated: #ffffff;   /* 卡片/输入框白底（深色模式换深色面板） */
-  --border: #dbe8e5;
-  --radius: 10px;
-  --shadow: 0 1px 3px rgba(21, 37, 35, 0.05);
-  --shadow-lift: 0 6px 20px rgba(21, 37, 35, 0.08);
-  /* 语义色（默认值 = 原硬编码值，浅色模式外观零变化） */
-  --danger: #c2453a;
-  --ok-bg: #e1f5ee;        --ok-text: #0f6e56;
-  --badge-teal-bg: #e2f4f1; --badge-teal-text: #0f766e;
-  --badge-amber-bg: #f5ecdd; --badge-amber-text: #a3762a;
-  --btn-disabled: #8ec8c2;
-  --nav-bg: rgba(255, 255, 255, 0.92);
-  --scroll-thumb: #c2ded9;  --scroll-thumb-hover: #a7cec8;
+  /* 纸与墨 */
+  --paper: #f4f1ea;
+  --paper-2: #ece7db;      /* 次级底色（极少用） */
+  --ink: #111111;
+  --ink-2: #3d3a35;
+  --ink-3: #7a7468;
+  --rule: #111111;         /* 主分隔线：与墨同色 */
+  --rule-soft: #d6d0c1;    /* 次级分隔线 */
+  --red: #da291c;
+  --red-dark: #b01f14;
+
+  /* 兼容旧变量名（组件内仍有引用，全部指向新色板） */
+  --primary: var(--red);
+  --primary-dark: var(--red-dark);
+  --primary-bg: transparent;
+  --text-1: var(--ink);
+  --text-2: var(--ink-2);
+  --text-3: var(--ink-3);
+  --bg-page: var(--paper);
+  --bg-card: var(--paper);
+  --bg-elevated: var(--paper);
+  --border: var(--rule-soft);
+  --card: var(--paper);
+  --radius: 0;
+  --shadow: none;
+  --shadow-lift: none;
+  --danger: var(--red);
+  --ok-bg: transparent;
+  --ok-text: var(--ink);
+  --badge-teal-bg: transparent;
+  --badge-teal-text: var(--ink);
+  --badge-amber-bg: transparent;
+  --badge-amber-text: var(--ink-2);
+  --btn-disabled: #b8b1a3;
+  --nav-bg: var(--paper);
+  --scroll-thumb: #c4bdae;
+  --scroll-thumb-hover: #8f887a;
+
+  /* 字体：新怪诞无衬线（Helvetica 系）。中文回退到系统黑体，保持等线观感 */
+  --font-sans: "Inter", "Helvetica Neue", Helvetica, Arial, "Segoe UI",
+    "Noto Sans SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  /* 展示字体：Instrument Serif（拉丁）+ 宋体回退（中文），只用于大标题 */
+  --font-display: "Instrument Serif", "Songti SC", "STSong", "SimSun",
+    "Source Han Serif SC", "Noto Serif SC", Georgia, serif;
+  --font-mono: ui-monospace, "SFMono-Regular", "Cascadia Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+
   color-scheme: light;
 }
 
-/* 深色模式：html.dark 由 theme.js 三态切换（auto/light/dark）控制 */
+/* 深色 = 黑纸版：反转墨与纸，强调红稍微提亮以保证对比度 */
 html.dark {
-  --primary-bg: #0e3b36;
-  --text-1: #e6efec;
-  --text-2: #a3bab5;
-  --text-3: #64807a;
-  --bg-page: #0c1615;
-  --bg-card: #12201e;
-  --bg-elevated: #162927;
-  --border: #243b37;
-  --shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
-  --shadow-lift: 0 6px 20px rgba(0, 0, 0, 0.5);
-  --danger: #f2827a;
-  --ok-bg: #0d3328;        --ok-text: #6ee7b7;
-  --badge-teal-bg: #0e3b36; --badge-teal-text: #5eead4;
-  --badge-amber-bg: #3a2f14; --badge-amber-text: #e5c07b;
-  --btn-disabled: #2a4a45;
-  --nav-bg: rgba(12, 22, 21, 0.88);
-  --scroll-thumb: #2a4a45;  --scroll-thumb-hover: #3c635d;
+  --paper: #0d0d0d;
+  --paper-2: #161616;
+  --ink: #f2efe8;
+  --ink-2: #cbc5b9;
+  --ink-3: #8c867c;
+  --rule: #f2efe8;
+  --rule-soft: #333333;
+  --red: #e4392b;
+  --red-dark: #ff5a4a;
+
+  --btn-disabled: #4a4a4a;
+  --scroll-thumb: #3a3a3a;
+  --scroll-thumb-hover: #5a5a5a;
+
   color-scheme: dark;
 }
 
@@ -58,13 +112,20 @@ html {
 }
 
 body {
-  font-size: 14px;
-  line-height: 1.5;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
-    "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
-  color: var(--text-1);
-  background: var(--bg-page);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--ink);
+  background: var(--paper);
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* 所有标题：中性、紧凑、负字距，只有 400 / 700 两档 */
+h1, h2, h3, h4, h5, h6 {
+  font-weight: 700;
+  line-height: 1.06;
+  letter-spacing: -0.02em;
 }
 
 a {
@@ -75,20 +136,66 @@ a {
 button {
   font-family: inherit;
   cursor: pointer;
+  border-radius: 0;
 }
 
-input {
+input, select, textarea {
   font-family: inherit;
+  border-radius: 0;
 }
 
-/* 细滚动条（低饱和灰，跟随主题） */
+::selection {
+  background: var(--red);
+  color: #fff;
+}
+
+/* 方角细滚动条（瑞士风格不用圆角胶囊） */
 ::-webkit-scrollbar { width: 8px; height: 8px; }
-::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-radius: 4px; }
+::-webkit-scrollbar-thumb { background: var(--scroll-thumb); }
 ::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); }
 ::-webkit-scrollbar-track { background: transparent; }
 
+/* 12 栏网格容器：左右留白固定，内容边缘永远对齐网格线 */
 .container {
-  max-width: 1080px;
+  max-width: 1240px;
   margin: 0 auto;
-  padding: 0 20px;
+  padding: 0 28px;
+}
+
+@media (max-width: 600px) {
+  .container { padding: 0 18px; }
+  body { font-size: 14px; }
+}
+
+/* ==========================================================================
+   动效基础（参考 claude.com 的克制节奏：位移 16~22px + 长缓动，不弹跳）
+   ========================================================================== */
+@keyframes rise {
+  from { opacity: 0; transform: translateY(22px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes marquee {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+
+/* 滚动入场：由 v-reveal 指令挂上 .reveal，进入视口后加 .is-in */
+.reveal {
+  opacity: 0;
+  transform: translateY(18px);
+  transition:
+    opacity 0.75s cubic-bezier(0.2, 0.65, 0.3, 1),
+    transform 0.75s cubic-bezier(0.2, 0.65, 0.3, 1);
+  will-change: opacity, transform;
+}
+.reveal.is-in { opacity: 1; transform: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .reveal { opacity: 1 !important; transform: none !important; transition: none !important; }
+  *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; }
 }

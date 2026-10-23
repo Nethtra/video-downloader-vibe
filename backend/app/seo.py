@@ -207,13 +207,17 @@ def _head_tags(u: "str | None") -> str:
     if u:
         lines.append(f'<meta name="twitter:image" content="{u}/og-image.png">')
     lines.append(f"""<style>
-      .seo-fallback{{max-width:1080px;margin:0 auto;padding:40px 20px;line-height:1.7}}
-      .seo-fallback h1{{font-size:34px;margin:18px 0 10px;color:var(--text-1,#152523)}}
-      .seo-fallback h2{{font-size:24px;margin:34px 0 12px;color:var(--text-1,#152523)}}
-      .seo-fallback h3{{font-size:17px;margin:18px 0 6px;color:var(--text-1,#152523)}}
-      .seo-fallback p,.seo-fallback li{{font-size:15px;margin:6px 0;color:var(--text-2,#3c5551)}}
+      .seo-fallback{{max-width:1080px;margin:0 auto;padding:48px 28px;line-height:1.7;
+        background:#f4f1ea;color:#111111;
+        font-family:"Helvetica Neue",Helvetica,Inter,Arial,"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif}}
+      .seo-fallback h1{{font-size:clamp(34px,5vw,64px);line-height:1.04;letter-spacing:-.035em;margin:0 0 18px;font-weight:700}}
+      .seo-fallback h2{{font-size:24px;line-height:1.1;letter-spacing:-.02em;margin:40px 0 12px;padding-top:12px;
+        border-top:1px solid #111111;font-weight:700}}
+      .seo-fallback h3{{font-size:16px;margin:18px 0 4px;font-weight:700}}
+      .seo-fallback p{{max-width:74ch}}
+      .seo-fallback p,.seo-fallback li{{font-size:13px;margin:6px 0;color:#3d3a35}}
       .seo-fallback ol,.seo-fallback ul{{padding-left:22px}}
-      .seo-fallback small{{color:var(--text-3,#6b8480)}}
+      .seo-fallback small{{color:#7a7468;font-size:11px}}
     </style>
     <script type="application/ld+json">{_jsonld(u)}</script>""")
     return "\n    ".join(lines)

@@ -94,7 +94,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
 /* ---------- 导出 PNG / SVG（浏览器本地生成，不经服务器） ---------- */
 const XML_ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' }
 const esc = s => String(s).replace(/[&<>"']/g, c => XML_ESC[c])
-const COLORS = { primary: '#3370ff', nodeBg: '#e8efff', text: '#1f2329', link: '#e5e6eb' }
+const COLORS = { primary: '#111111', nodeBg: '#f4f1ea', text: '#111111', link: '#c9c2b4', red: '#da291c' }
 
 // 独立构造 SVG 字符串（内联样式，不依赖组件 CSS），同时用于 SVG 下载与 PNG 转换
 function buildSvgString() {
@@ -110,8 +110,8 @@ function buildSvgString() {
   for (const n of nodes) {
     const w = n.isRoot ? ROOT_W : NODE_W
     const stroke = n.isRoot ? '' : ` stroke="${COLORS.primary}" stroke-width="1"`
-    out.push(`<rect x="${n.x}" y="${n.y}" width="${w}" height="${NODE_H}" rx="8" fill="${n.isRoot ? COLORS.primary : COLORS.nodeBg}"${stroke}/>`)
-    out.push(`<text x="${n.x + w / 2}" y="${n.y + NODE_H / 2 + 1}" text-anchor="middle" dominant-baseline="middle" font-size="${n.isRoot ? 13 : 12.5}" font-weight="${n.isRoot ? 600 : 400}" fill="${n.isRoot ? '#fff' : COLORS.text}" font-family="PingFang SC, Microsoft YaHei, sans-serif">${esc(short(n.title))}</text>`)
+    out.push(`<rect x="${n.x}" y="${n.y}" width="${w}" height="${NODE_H}" fill="${n.isRoot ? COLORS.primary : COLORS.nodeBg}"${stroke}/>`)
+    out.push(`<text x="${n.x + w / 2}" y="${n.y + NODE_H / 2 + 1}" text-anchor="middle" dominant-baseline="middle" font-size="${n.isRoot ? 13 : 12.5}" font-weight="${n.isRoot ? 700 : 400}" fill="${n.isRoot ? '#f4f1ea' : COLORS.text}" font-family="Helvetica Neue, Helvetica, Arial, PingFang SC, Microsoft YaHei, sans-serif">${esc(short(n.title))}</text>`)
   }
   out.push('</svg>')
   return out.join('\n')
@@ -171,20 +171,20 @@ function downloadPng() {
           v-for="(l, i) in tree.links"
           :key="i"
           :d="`M ${l.x1} ${l.y1} C ${(l.x1 + l.x2) / 2} ${l.y1}, ${(l.x1 + l.x2) / 2} ${l.y2}, ${l.x2} ${l.y2}`"
-          style="fill: none; stroke: var(--border, #dbe8e5); stroke-width: 1.5"
+          style="fill: none; stroke: var(--rule-soft, #c9c2b4); stroke-width: 1"
         />
         <g v-for="n in tree.nodes" :key="n.id" :transform="`translate(${n.x}, ${n.y})`">
           <rect
             :width="n.isRoot ? dims.ROOT_W : dims.NODE_W"
             :height="dims.NODE_H"
-            rx="8"
+            rx="0"
             :style="n.isRoot
-              ? { fill: 'var(--primary, #0d9488)' }
-              : { fill: 'var(--primary-bg, #e6f5f2)', stroke: 'var(--primary, #0d9488)', strokeWidth: '1px' }"
+              ? { fill: 'var(--ink, #111111)' }
+              : { fill: 'transparent', stroke: 'var(--ink, #111111)', strokeWidth: '1px' }"
           />
           <text :x="(n.isRoot ? dims.ROOT_W : dims.NODE_W) / 2" :y="dims.NODE_H / 2 + 1" text-anchor="middle" dominant-baseline="middle" :style="n.isRoot
-            ? { fill: '#fff', fontSize: '13px', fontWeight: 600 }
-            : { fill: 'var(--text-1, #152523)', fontSize: '12.5px' }">
+            ? { fill: 'var(--paper, #f4f1ea)', fontSize: '13px', fontWeight: 700 }
+            : { fill: 'var(--ink, #111111)', fontSize: '12.5px' }">
             {{ short(n.title) }}
           </text>
         </g>
@@ -214,20 +214,20 @@ function downloadPng() {
             v-for="(l, i) in tree.links"
             :key="i"
             :d="`M ${l.x1} ${l.y1} C ${(l.x1 + l.x2) / 2} ${l.y1}, ${(l.x1 + l.x2) / 2} ${l.y2}, ${l.x2} ${l.y2}`"
-            style="fill: none; stroke: var(--border, #dbe8e5); stroke-width: 1.5"
+            style="fill: none; stroke: var(--rule-soft, #c9c2b4); stroke-width: 1"
           />
           <g v-for="n in tree.nodes" :key="n.id" :transform="`translate(${n.x}, ${n.y})`">
             <rect
               :width="n.isRoot ? dims.ROOT_W : dims.NODE_W"
               :height="dims.NODE_H"
-              rx="8"
+              rx="0"
               :style="n.isRoot
-                ? { fill: 'var(--primary, #0d9488)' }
-                : { fill: 'var(--primary-bg, #e6f5f2)', stroke: 'var(--primary, #0d9488)', strokeWidth: '1px' }"
+                ? { fill: 'var(--ink, #111111)' }
+                : { fill: 'transparent', stroke: 'var(--ink, #111111)', strokeWidth: '1px' }"
             />
             <text :x="(n.isRoot ? dims.ROOT_W : dims.NODE_W) / 2" :y="dims.NODE_H / 2 + 1" text-anchor="middle" dominant-baseline="middle" :style="n.isRoot
-              ? { fill: '#fff', fontSize: '13px', fontWeight: 600 }
-              : { fill: 'var(--text-1, #152523)', fontSize: '12.5px' }">
+              ? { fill: 'var(--paper, #f4f1ea)', fontSize: '13px', fontWeight: 700 }
+              : { fill: 'var(--ink, #111111)', fontSize: '12.5px' }">
               {{ short(n.title) }}
             </text>
           </g>
@@ -238,28 +238,31 @@ function downloadPng() {
 </template>
 
 <style scoped>
-.mm-toolbar { display: flex; justify-content: flex-end; gap: 6px; margin-bottom: 6px; }
+/* 瑞士风格：方角、细线、编号式工具条；颜色全部走全局令牌 */
+.mm-toolbar { display: flex; justify-content: flex-end; gap: 0; margin-bottom: 8px; border-bottom: 1px solid var(--rule, #111); }
 .mm-tool-btn {
-  border: 1px solid var(--border, #dbe8e5);
-  background: var(--bg-elevated, #fff);
-  color: var(--text-2, #4e5969);
-  font-size: 12px;
-  padding: 4px 10px;
-  border-radius: 6px;
+  border: none;
+  border-left: 1px solid var(--rule-soft, #d6d0c1);
+  background: transparent;
+  color: var(--ink-2, #3d3a35);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  padding: 7px 10px;
   cursor: pointer;
-  transition: all 0.12s;
+  transition: background 0.1s, color 0.1s;
 }
-.mm-tool-btn:hover { color: var(--primary, #0d9488); border-color: var(--primary, #0d9488); }
-.mm-scroll { overflow: auto; }
+.mm-tool-btn:first-child { border-left: none; }
+.mm-tool-btn:hover { background: var(--ink, #111); color: var(--paper, #f4f1ea); }
+.mm-scroll { overflow: auto; border: 1px solid var(--rule-soft, #d6d0c1); padding: 8px; }
 .mindmap-svg { display: block; }
 /* 节点/连线颜色用内联 style 绑定（vite 8 rolldown 会裁剪只出现在动态 :class 里的规则） */
 
-/* 覆盖层全屏（浅色模式保持白色主题；深色模式跟随 --bg-page 变量切换） */
 .mm-overlay {
   position: fixed;
   inset: 0;
   z-index: 200;
-  background: var(--bg-page, rgba(255, 255, 255, 0.98));
+  background: var(--paper, #f4f1ea);
   display: flex;
   flex-direction: column;
 }
@@ -267,29 +270,32 @@ function downloadPng() {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 12px 18px;
+  padding: 0 18px;
+  height: 56px;
   flex-shrink: 0;
-  border-bottom: 1px solid var(--border, #dbe8e5);
+  border-bottom: 1px solid var(--rule, #111);
 }
 .mm-overlay-title {
-  color: var(--text-1, #152523);
+  color: var(--ink, #111);
   font-size: 15px;
-  font-weight: 600;
+  font-weight: 700;
+  letter-spacing: -0.01em;
   flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.mm-overlay-actions { display: flex; gap: 8px; flex-shrink: 0; }
-.mm-close { margin-left: 8px; }
+.mm-overlay-actions { display: flex; gap: 0; flex-shrink: 0; border-left: 1px solid var(--rule-soft, #d6d0c1); }
+.mm-overlay-actions .mm-tool-btn { padding: 8px 12px; }
 .mm-overlay-body {
   flex: 1;
   min-height: 0;
-  padding: 8px 18px 20px;
+  padding: 16px 18px 20px;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 .mm-overlay-body.scroll { display: block; overflow: auto; }
-.mm-overlay-svg { display: block; }</style>
+.mm-overlay-svg { display: block; }
+</style>
